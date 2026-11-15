@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.log
+# Backups and exported customer data must never be published.
+*backup*.json
+*Backup*.json
+*BACKUP*.json
+*recovery*.json
+backups/
+exports/
+recovery/
+private/
+# JSON exports may be renamed; only dependency metadata belongs in Git.
+*.json
+!package.json
+!package-lock.json

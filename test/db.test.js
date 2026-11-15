@@ -1,0 +1,24 @@
+import 'fake-indexeddb/auto';
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {read,mutate,restore,connect,recoveryCopies} from '../src/db.js';
+import {initial,stock,parseBackup,backup} from '../src/domain.js';
+test('IndexedDB: persistência, atomicidade, concorrência, idempotência e restauração',async()=>{
+  const confirmedRestore=async data=>restore(data,{confirmed:true,expectedState:JSON.stringify(await read())});
+  await confirmedRestore(initial());
+  await mutate({id:'day',type:'open',items:[{flavorId:'f0',qty:3},{flavorId:'f1',qty:1}]});
+  await assert.rejects(mutate({id:'bad',type:'sale',items:[{flavorId:'f0',qty:1},{flavorId:'f1',qty:2}],method:'Pix'}));
+  assert.equal((await read()).sales.length,0);
+  const cmd={id:'sale',type:'sale',items:[{flavorId:'f0',qty:2}],method:'Pix'};
+  await Promise.all([mutate(cmd),mutate(cmd)]);
+  assert.equal((await read()).sales.length,1);
+  const results=await Promise.allSettled(['a','b'].map(id=>mutate({id,type:'sale',items:[{flavorId:'f0',qty:1}],method:'Pendente'})));
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  const state=await read();assert.equal(stock(state,'day','f0').available,0);
+  const independent=await new Promise((resolve,reject)=>{const r=indexedDB.open('cookies-campus',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+  const persisted=await new Promise(resolve=>{const r=independent.transaction('app').objectStore('app').get('state');r.onsuccess=()=>resolve(r.result);});
+  independent.close();assert.deepEqual(persisted,state);
+  await confirmedRestore(parseBackup(backup(state)));assert.deepEqual(await read(),state);
+  await assert.rejects(confirmedRestore({...state,version:999}));assert.deepEqual(await read(),state);
+  assert.ok((await recoveryCopies()).some(c=>JSON.stringify(c.data)===JSON.stringify(state)));
+});
