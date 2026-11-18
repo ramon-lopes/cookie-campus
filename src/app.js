@@ -1,13 +1,15 @@
-import {createOperationsUI} from './operations-ui.js';
+import { createOperationsUI } from "./operations-ui.js";
+import { displayDate, renderHistory } from "./history-ui.js";
+import { createAccess } from "./access.js";
 import {
   opened,
   stock,
   financial,
   total,
-  METHODS,
   backup,
   localDate,
   businessDate,
+  nextOpening,
 } from "./domain.js";
 import { read, mutate } from "./db.js";
 const $ = (s) => document.querySelector(s),
@@ -30,9 +32,11 @@ const stamp = (s) =>
     dateStyle: "short",
     timeStyle: "short",
   });
+const clock = (s) => new Date(s).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 let state,
   tab = "hoje",
   busy = false;
+let dialogTrigger;
 const dialog = $("#dialog"),
   channel =
     "BroadcastChannel" in window
@@ -46,7 +50,11 @@ function toast(message) {
 function modal(title, html) {
   $("#dialog-title").textContent = title;
   $("#dialog-body").innerHTML = html;
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) {
+    const trigger = document.activeElement;
+    dialogTrigger = { id: trigger?.id, disclosure: trigger?.closest("[data-disclosure]")?.dataset.disclosure };
+    dialog.showModal();
+  } else $("#dismiss").focus({ preventScroll: true });
 }
 $("#dismiss").onclick = () => {
   if (!busy) dialog.close();
@@ -54,60 +62,79 @@ $("#dismiss").onclick = () => {
 dialog.addEventListener("cancel", (e) => {
   if (busy) e.preventDefault();
 });
-const methodOptions = (pending = true) =>
-  [...METHODS, ...(pending ? ["Pendente"] : [])]
-    .map((m) => `<option>${m}</option>`)
-    .join("");
 function form(content, label = "Salvar") {
   return `<form>${content}<p class="error" role="alert"></p><button class="primary" type="submit">${label}</button></form>`;
 }
 function bindForm(make) {
   const f = $("#dialog-body form"),
-    id = crypto.randomUUID();
+    id = crypto.randomUUID(),
+    expectedDayId = opened(state)?.id ?? null;
   f.onsubmit = async (e) => {
     e.preventDefault();
-    if (busy) return;
-    busy = true;
+    if (busy || access.locked) return;
+    setBusy(true);
     const b = f.querySelector("[type=submit]");
     b.disabled = true;
     try {
-      state = await mutate({ ...make(new FormData(f)), id });
+      const command = make(new FormData(f));
+      state = await mutate({
+        ...command, id,
+        expectedDayId: command.type === "flavor" ? undefined : expectedDayId,
+      });
       channel?.postMessage("changed");
       dialog.close();
       render();
+      const disclosure = dialogTrigger?.disclosure;
+      const target = (dialogTrigger?.id && document.getElementById(dialogTrigger.id)) ||
+        (disclosure && document.querySelector(`[data-disclosure="${CSS.escape(disclosure)}"] > summary`));
+      (target || $("#app")).focus({ preventScroll: true });
       toast("Salvo com sucesso.");
     } catch (err) {
       f.querySelector(".error").textContent = err.message;
     } finally {
-      busy = false;
+      setBusy(false);
       b.disabled = false;
     }
   };
 }
-function quantities(initial = false) {
-  const d = opened(state);
-  return `<div class="form-items">${state.flavors
-    .filter((f) => f.active)
-    .map((f) => {
-      const q = d ? stock(state, d.id, f.id).available : 0;
-      return `<label class="quantity"><span>${esc(f.name)}<small>${money(f.price)}${!initial ? ` · ${q} disponíveis` : ""}</small></span><input aria-label="Quantidade de ${esc(f.name)}" name="qty_${f.id}" type="number" inputmode="numeric" min="0" ${initial ? "" : `max="${q}"`} step="1" value="0"></label>`;
-    })
-    .join("")}</div>`;
-}
-function selected(fd) {
-  return state.flavors
-    .map((f) => ({ flavorId: f.id, qty: Number(fd.get("qty_" + f.id) || 0) }))
-    .filter((i) => i.qty > 0);
-}
 function openDay() {
-  modal(
-    "Abrir dia de vendas",
-    form(
-      `<p class="muted">Conte os cookies disponíveis para começar. As sobras do dia anterior devem entrar nesta contagem.</p>${quantities(true)}`,
-      "Abrir dia",
-    ),
-  );
-  bindForm((fd) => ({ type: "open", items: selected(fd) }));
+  const { previousDayId, source } = nextOpening(state);
+  const carriedByFlavor = new Map(Object.entries(source?.carryover ?? {}));
+  const flavors = state.flavors.filter((f) => f.active || carriedByFlavor.has(f.id));
+  const inputRows = flavors.map((f, index) => {
+    const carried = carriedByFlavor.get(f.id) ?? 0;
+    return `<fieldset class="stock-form-row">
+      <legend>${esc(f.name)}${f.active ? "" : " (inativo)"}</legend>
+      <div class="stock-form-values">
+        <div class="form-stat"><span>Sobras do dia anterior</span><strong>${carried}</strong></div>
+        <label>Recebimento novo
+          ${f.active ? `<input aria-label="Recebimento novo de ${esc(f.name)}" name="qty_${index}"
+            data-carried="${carried}" type="number" inputmode="numeric" min="0" step="1" placeholder="0">` : "<strong>0</strong>"}
+        </label>
+        <div class="form-stat"><span>Total disponível</span><output data-total="${index}">${carried}</output></div>
+      </div>
+    </fieldset>`;
+  }).join("");
+  modal("Abrir dia de vendas", form(
+    `<p class="note">${source
+      ? `Sobras confirmadas em <strong>${displayDate(businessDate(source))}</strong>. Informe apenas o recebimento novo.`
+      : "Sem sobras confirmadas do último dia de venda. Informe os cookies recebidos para esta abertura."}</p>
+      <div class="form-items">${inputRows}</div>`,
+    "Abrir dia",
+  ));
+  const openingForm = $("#dialog-body form");
+  openingForm.oninput = (e) => {
+    const carried = e.target.dataset.carried;
+    if (carried === undefined) return;
+    const output = openingForm.querySelector(`[data-total="${e.target.name.slice(4)}"]`);
+    output.value = Number(carried) + Number(e.target.value || 0);
+  };
+  bindForm((fd) => ({
+    type: "open",
+    expectedPreviousDayId: previousDayId,
+    items: flavors.map((f, index) => ({ flavorId: f.id, qty: Number(fd.get("qty_" + index) || 0) }))
+      .filter((i) => i.qty > 0),
+  }));
 }
 function sale(reserve=false,id){return ui.sale(reserve,id);}
 function move() {
@@ -136,38 +163,73 @@ function cancel(id) {
   bindForm(() => ({ type: "cancel", reservationId: id }));
 }
 function voidSale(id) {
+  const sale = state.sales.find((v) => v.id === id);
+  if (!sale) return;
   modal(
     "Estornar venda",
     form(
-      '<p class="note">O estorno cancela a venda e devolve os cookies ao estoque. Se houve pagamento, ele continua como entrada de caixa e gera um reembolso pendente. Depois de devolver o dinheiro, registre o reembolso no Histórico.</p><label>Motivo<input name="reason" required maxlength="200"></label>',
+      `<p><strong>${esc(sale.customer || "Venda no balcão")}</strong> · ${money(total(sale.items))}<br>
+        <span class="muted">${stamp(sale.at)} · ${sale.items.map((i) => `${i.qty}× ${esc(i.name)}`).join(", ")}</span></p>
+        <p class="note">O estorno recompõe o estoque. Se houve pagamento, ele continua no caixa até você registrar a devolução efetiva no Histórico.</p>
+        <label>Motivo<input name="reason" required maxlength="200"></label>`,
       "Confirmar estorno",
     ),
   );
   bindForm((fd) => ({ type: "void", saleId: id, reason: fd.get("reason") }));
 }
 function closeDay() {
-  const d = opened(state);
-  modal(
-    "Conferir e fechar",
-    form(
-      `<p class="muted">Informe o estoque físico. Resolva reservas e registre perdas ou ajustes antes do fechamento.</p>${state.flavors.map((f) => `<label class="close-count"><span>${esc(f.name)}<small class="muted"> · esperado: ${stock(state, d.id, f.id).available}</small><span class="diff" data-diff="${esc(f.id)}"></span></span><input name="${esc(f.id)}" type="number" inputmode="numeric" min="0" step="1" required></label>`).join("")}<div class="day-total">Vendas: ${money(financial(state, d.id).gross)} · Caixa líquido: ${money(financial(state, d.id).cashNet)} · A reembolsar: ${money(financial(state, d.id).refundPending)}</div>`,
-      "Fechar dia",
-    ),
-  );
+  const day = opened(state);
+  const pending = state.reservations.filter((r) => r.dayId === day.id && r.status === "pending");
+  if (pending.length) {
+    modal("Resolva as reservas", `<p class="note">Há ${pending.length} ${pending.length === 1 ? "reserva pendente" : "reservas pendentes"}.
+      Em Reservas, conclua as retiradas feitas ou cancele as que ficaram em aberto. Depois, volte para fechar o dia.</p>
+      <button class="primary wide" id="go-reservations">Ir para Reservas</button>`);
+    $("#go-reservations").onclick = () => {
+      dialog.close();
+      navigate("reservas");
+    };
+    return;
+  }
+  const flavors = state.flavors;
+  const rows = flavors.map((flavor, index) => {
+    const { available } = stock(state, day.id, flavor.id);
+    return `<fieldset class="stock-form-row" data-expected="${available}">
+      <legend>${esc(flavor.name)}</legend>
+      <div class="stock-form-values">
+        <div class="form-stat"><span>Saldo no app</span><strong>${available}</strong></div>
+        <label>Contagem física<input aria-label="Contagem física de ${esc(flavor.name)}"
+          name="count_${index}" data-count type="number" inputmode="numeric" min="0" step="1" required></label>
+        <label>Reaproveitar<input aria-label="Reaproveitar ${esc(flavor.name)}"
+          name="carry_${index}" data-carry type="number" inputmode="numeric" min="0" max="${available}"
+          step="1" value="${available}" required></label>
+      </div>
+      <p class="diff" data-diff aria-live="polite"></p>
+    </fieldset>`;
+  }).join("");
+  modal("Conferir e fechar", form(
+    `<p class="note">Confira a contagem física. Em <strong>Reaproveitar</strong>, confirme quantas unidades entram na próxima abertura. As demais ficam só no saldo deste dia. Lance perdas e divergências em <strong>Movimentar estoque</strong> antes de fechar.</p>
+    <button type="button" id="move-before-close">Movimentar estoque</button>
+    <div class="form-items">${rows}</div>`, "Confirmar fechamento",
+  ));
+  $("#move-before-close").onclick = move;
   $("#dialog-body form").oninput = (e) => {
-    const f = state.flavors.find((f) => f.id === e.target.name);
-    if (f) {
-      const diff = Number(e.target.value) - stock(state, d.id, f.id).available;
-      $("#dialog-body").querySelector(
-        `[data-diff="${CSS.escape(f.id)}"]`,
-      ).textContent = diff
-        ? ` Diferença: ${diff > 0 ? "+" : ""}${diff}`
-        : " Conferido";
-    }
+    const row = e.target.closest("[data-expected]");
+    if (!row) return;
+    const count = row.querySelector("[data-count]");
+    const carry = row.querySelector("[data-carry]");
+    const status = row.querySelector("[data-diff]");
+    if (e.target === carry) carry.dataset.edited = "true";
+    const difference = Number(count.value) - Number(row.dataset.expected);
+    status.textContent = !count.value ? "" : difference
+      ? `Diferença de ${difference > 0 ? "+" : ""}${difference}. Registre uma perda ou ajuste.`
+      : "Contagem confere.";
+    carry.max = count.value || row.dataset.expected;
+    if (!carry.dataset.edited && count.value) carry.value = count.value;
   };
   bindForm((fd) => ({
     type: "close",
-    counts: Object.fromEntries([...fd].map(([k, v]) => [k, Number(v)])),
+    counts: Object.fromEntries(flavors.map((f, index) => [f.id, Number(fd.get("count_" + index))])),
+    carryover: Object.fromEntries(flavors.map((f, index) => [f.id, Number(fd.get("carry_" + index))])),
   }));
 }
 function share() {
@@ -192,6 +254,7 @@ function share() {
   $("#share-text").value = available.length
     ? message
     : "Sem sabores disponíveis neste momento.";
+  $("#copy").disabled = !available.length;
   $("#copy").onclick = async () => {
     try {
       await navigator.clipboard.writeText($("#share-text").value);
@@ -229,127 +292,142 @@ function download(data) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
-function settings(){return ui.settings();}
-function refundLabel(v,paid){if(!paid)return 'Sem pagamento recebido; não há reembolso.';if(!v.refund)return 'Registro antigo: reembolso presumido pela versão anterior, sem confirmação registrada.';if(v.refund.status==='pending')return 'Reembolso pendente — o dinheiro ainda consta no caixa.';return 'Reembolsado por '+esc(v.refund.method)+' em '+stamp(v.refund.at)+'.';}
-function pendingPanel(){const pending=state.sales.filter(v=>!v.voidedAt&&!state.payments.some(p=>p.saleId===v.id));return '<section class="card" style="margin-top:16px"><h2>Pendências de todos os dias</h2>'+pending.map(v=>'<div class="row"><div><strong>'+esc(v.customer||'Venda no balcão')+'</strong><p class="receipt">'+stamp(v.at)+' · '+money(total(v.items))+'</p></div><button data-payment="'+esc(v.id)+'">Receber</button></div>').join('')+(pending.length?'':'<p class="muted">Nenhum pagamento pendente.</p>')+'</section>'; }
-function dayWarning(d){return businessDate(d)!==localDate()?'<p class="note" role="status">Dia operacional de <strong>'+businessDate(d)+'</strong> ainda aberto. Vendas e recebimentos continuam nesse dia até você conferir, fechar e abrir outro.</p>':'';}
+function dayWarning(d) {
+  return businessDate(d) !== localDate()
+    ? `<p class="note" role="status">O dia de <strong>${displayDate(businessDate(d))}</strong> segue aberto.
+      As operações ficam nesse dia até você fechar e abrir outro.</p>`
+    : "";
+}
+function stockCard(flavor, q) {
+  const status = q.available ? "disponíveis" : q.reserved ? "Sem unidades livres" : "Esgotado";
+  return `<article class="card stock-card">
+    <div class="stock-top"><span class="cookie" aria-hidden="true">⠿</span>
+      <div><h3>${esc(flavor.name)}${flavor.active ? "" : " (inativo)"}</h3><div class="price">${money(flavor.price)}</div></div>
+    </div>
+    <div class="stock-available ${q.available ? "" : "stock-zero"}"><strong>${q.available}</strong><span>${status}</span></div>
+    <dl class="stock-info"><div class="${!q.available && q.reserved ? "reserved-highlight" : ""}">
+      <dt>Reservados</dt><dd>${q.reserved}</dd></div><div><dt>Vendidos</dt><dd>${q.sold}</dd></div></dl>
+  </article>`;
+}
+const disclosures = new Map();
+function rememberDisclosures() {
+  for (const details of $("#app").querySelectorAll("[data-disclosure]"))
+    disclosures.set(details.dataset.disclosure, details.open);
+}
+function navigate(next) {
+  tab = next;
+  render();
+  window.scrollTo(0, 0);
+}
 function render() {
-  const d = opened(state),
-    f = financial(state, d?.id),
-    today = new Date().toLocaleDateString("pt-BR", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    });
-  document
-    .querySelectorAll("[data-tab]")
-    .forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  if (access.locked || !state) return;
+  const d = opened(state);
+  const app = $("#app");
+  rememberDisclosures();
+  document.querySelectorAll("[data-tab]").forEach((b) => {
+    const selected = b.dataset.tab === tab;
+    b.classList.toggle("active", selected);
+    if (selected) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   if (tab === "hoje") {
-    $("#app").innerHTML =
-      `<div class="heading"><div><div class="eyebrow">${esc(today)}</div><h1>Vamos vender cookies?</h1><div class="muted">Seu negócio, na palma da mão.</div></div><span class="pill">${d ? "● Dia aberto" : "○ Dia fechado"}</span></div>${
-        d
-          ? `${dayWarning(d)}<section class="hero"><div><h2>A próxima venda começa aqui.</h2><p>Escolha o sabor, receba e pronto.</p></div><button id="quick">＋ Venda rápida</button></section><div class="metrics"><div class="metric"><small>Vendas do dia</small><strong>${money(f.gross)}</strong></div><div class="metric"><small>Cookies vendidos</small><strong>${f.units} <span class="unit">un.</span></strong></div><div class="metric"><small>A receber do dia</small><strong>${money(f.pending)}</strong></div></div><div class="section-title"><h2>Seus cookies</h2><button id="move">＋ Movimentar estoque</button></div><div class="grid">${state.flavors
-              .filter(
-                (fl) =>
-                  fl.active ||
-                  stock(state, d.id, fl.id).available ||
-                  stock(state, d.id, fl.id).reserved,
-              )
-              .map((fl) => {
-                const q = stock(state, d.id, fl.id);
-                return `<article class="card"><div class="stock-top"><span class="cookie" aria-hidden="true">⠿</span><div><h3>${esc(fl.name)}${fl.active ? "" : " (inativo)"}</h3><div class="price">${money(fl.price)}</div></div></div><div class="stock-info"><div><strong>${q.available}</strong><span>disponíveis</span></div><div class="minor"><strong>${q.reserved}</strong><span>reservados</span></div><div class="minor"><strong>${q.sold}</strong><span>vendidos</span></div></div></article>`;
-              })
-              .join(
-                "",
-              )}</div><div class="actions"><button id="share">↗ Divulgar no WhatsApp</button><button id="close">Conferir e fechar dia</button></div><p class="muted">Caixa líquido do dia: <strong>${money(f.cashNet)}</strong>. Pendências de todos os dias: <strong>${money(financial(state).pending)}</strong>.</p>`
-          : `<section class="empty"><h2>Uma nova fornada, um novo dia.</h2><p class="muted">Abra o dia com a contagem dos cookies que você trouxe.</p><button class="primary" id="open">＋ Abrir dia de vendas</button></section>`
-      }`;
-    $("#quick")?.addEventListener("click", () => sale());
-    $("#open")?.addEventListener("click", openDay);
-    $("#move")?.addEventListener("click", move);
-    $("#share")?.addEventListener("click", share);
-    $("#close")?.addEventListener("click", closeDay);
-  }
-  if (tab === "reservas") {
+    const dayDate = displayDate(d ? businessDate(d) : localDate());
+    const title = `<div class="heading"><div><div class="eyebrow">${dayDate}</div><h1>Hoje</h1></div>
+      <span class="pill ${d ? "" : "closed-pill"}">${d ? "Dia aberto" : "Sem dia aberto"}</span></div>`;
+    if (!d) {
+      const { source } = nextOpening(state);
+      app.innerHTML = `${title}<section class="empty"><h2>Abrir dia de vendas</h2>
+        <p class="muted">${source
+          ? `Há sobras confirmadas em ${displayDate(businessDate(source))} prontas para aproveitar.`
+          : "Informe os cookies recebidos para começar."}</p>
+        <button class="primary" id="open">Abrir dia</button></section>`;
+      $("#open").onclick = openDay;
+      return;
+    }
+    const n = financial(state, d.id);
+    const cards = state.flavors.map((flavor) => ({ flavor, q: stock(state, d.id, flavor.id) }))
+      .filter(({ flavor, q }) => flavor.active || q.available || q.reserved || q.sold)
+      .map(({ flavor, q }) => stockCard(flavor, q)).join("");
+    app.innerHTML = `${title}${dayWarning(d)}
+      <section class="hero" aria-label="Registrar venda"><div><span>Vendas de ${dayDate}</span><strong>${money(n.gross)}</strong></div>
+        <button id="quick">＋ Venda rápida</button></section>
+      <div class="metrics today-metrics">
+        <div class="metric"><small>Cookies vendidos</small><strong>${n.units}</strong></div>
+        <div class="metric"><small>Caixa líquido</small><strong>${money(n.cashNet)}</strong></div>
+        <div class="metric"><small>A receber do dia</small><strong>${money(n.pending)}</strong></div>
+      </div>
+      <div class="section-title"><h2>Estoque por sabor</h2><button id="move">Movimentar estoque</button></div>
+      <div class="grid stock-grid">${cards}</div>
+      <div class="actions"><button id="share">Divulgar no WhatsApp</button><button id="close">Conferir e fechar dia</button></div>`;
+    $("#quick").onclick = () => sale();
+    $("#move").onclick = move;
+    $("#share").onclick = share;
+    $("#close").onclick = closeDay;
+  } else if (tab === "reservas") {
     const rs = state.reservations.filter((r) => r.status === "pending");
-    $("#app").innerHTML =
-      `<div class="heading"><div><div class="eyebrow">Separados com carinho</div><h1>Reservas</h1></div><span class="pill">${rs.length} pendentes</span></div><button class="primary wide" id="reserve">＋ Nova reserva</button><div class="stack" style="margin-top:20px">${rs.length ? rs.map((r) => `<article class="card"><div class="row"><h3>${esc(r.customer)}</h3><span class="tag">${esc(r.location)}</span></div><p class="receipt">${r.items.map((i) => `${i.qty}× ${esc(i.name)}`).join("<br>")}</p><strong>${money(total(r.items))}</strong><div class="actions"><button data-edit-reservation="${esc(r.id)}">Editar</button><button data-cancel="${esc(r.id)}">Cancelar</button><button class="primary" data-complete="${esc(r.id)}">Concluir retirada</button></div></article>`).join("") : '<div class="empty"><h2>Tudo em dia.</h2><p class="muted">Suas próximas reservas aparecem aqui.</p></div>'}</div>`;
+    app.innerHTML = `<div class="heading"><h1>Reservas</h1><span class="pill">${rs.length} pendentes</span></div>
+      <button class="primary wide" id="reserve">＋ Nova reserva</button><div class="stack reservations-list">${rs.length
+        ? rs.map((r) => `<article class="card"><div class="row"><h3>${esc(r.customer)}</h3><span class="tag">${esc(r.location)}</span></div>
+          <p class="receipt">${r.items.map((i) => `${i.qty}× ${esc(i.name)}`).join("<br>")}</p><strong>${money(total(r.items))}</strong>
+          <div class="actions"><button data-edit-reservation="${esc(r.id)}">Editar</button><button data-cancel="${esc(r.id)}">Cancelar</button>
+            <button class="primary" data-complete="${esc(r.id)}">Concluir retirada</button></div></article>`).join("")
+        : '<p class="empty">Nenhuma reserva pendente.</p>'}</div>`;
     $("#reserve").onclick = () => sale(true);
-    document
-      .querySelectorAll("[data-cancel]")
-      .forEach((b) => (b.onclick = () => cancel(b.dataset.cancel)));
-    document
-      .querySelectorAll("[data-complete]")
-      .forEach(
-        (b) => (b.onclick = () => payment("complete", b.dataset.complete)),
-      );
-  }
-  if (tab === "historico") {
-    const all = financial(state);
-    $("#app").innerHTML =
-      `<div class="heading"><div><div class="eyebrow">Cada cookie conta</div><h1>Histórico</h1></div><button id="backup">Backup</button></div><div class="day-total">Vendas após estornos: ${money(all.gross)} · ${all.units} unidades<br>Estornos: ${money(all.voided)} · A receber: ${money(all.pending)}<br>Entradas: ${money(all.collected)} · Reembolsos: ${money(all.refunded)}<br>Caixa líquido: ${money(all.cashNet)} · A reembolsar: ${money(all.refundPending)}</div>${pendingPanel()}${
-        [...state.days]
-          .reverse()
-          .map((day) => {
-            const n = financial(state, day.id);
-            return `<details ${day.id === d?.id ? "open" : ""}><summary>${businessDate(day)} · ${day.closedAt ? "Fechado" : "Aberto"} — ${money(n.gross)}</summary><div class="card"><p class="receipt">${n.units} vendidos · Entradas: ${money(n.collected)} · Reembolsos: ${money(n.refunded)} · Caixa líquido: ${money(n.cashNet)}<br>Vendas estornadas: ${money(n.voided)} · A reembolsar: ${money(n.refundPending)}<br>${METHODS.map((m) => `${m}: ${money(n.cashMethods[m])}`).join(" · ")}<br>A receber destas vendas: ${money(n.pending)}</p>${
-              state.sales
-                .filter((v) => v.dayId === day.id)
-                .slice()
-                .reverse()
-                .map((v) => {
-                  const paid = state.payments.find((p) => p.saleId === v.id);
-                  return `<div class="row"><div><h3>${esc(v.customer || "Venda no balcão")} ${v.voidedAt ? '<span class="tag">Estornada</span>' : ""}</h3><p class="receipt">${v.items.map((i) => `${i.qty}× ${esc(i.name)}`).join(", ")}<br>${stamp(v.at)} · ${paid ? `${esc(paid.method)} · recebido ${stamp(paid.at)}` : "Pagamento pendente"}</p><strong>${v.voidedAt ? `<del>${money(total(v.items))}</del>` : money(total(v.items))}</strong>${v.voidedAt ? `<p class="receipt">Estorno: ${esc(v.voidReason)} · ${stamp(v.voidedAt)}<br>${refundLabel(v,paid)}</p>` : ""}<div class="actions">${v.refund?.status==="pending"?`<button data-refund="${esc(v.id)}">Registrar reembolso</button>`:""}${!paid && !v.voidedAt ? `<button data-payment="${esc(v.id)}">Receber</button>` : ""}${!v.voidedAt && day.id === d?.id ? `<button class="danger" data-void="${esc(v.id)}">Estornar</button>` : ""}</div></div></div>`;
-                })
-                .join("") || '<p class="muted">Nenhuma venda neste dia.</p>'
-            }<details><summary>Estoque e movimentações</summary>${state.flavors
-              .map((fl) => {
-                const q = stock(state, day.id, fl.id);
-                return `<p class="receipt">${esc(fl.name)}: ${q.received} recebidos, ${q.adjustments} ajustes, ${q.losses} perdas, ${q.sold} vendidos, ${q.available} restantes.</p>`;
-              })
-              .join("")}${state.events
-              .filter((e) => e.dayId === day.id && e.kind !== "audit")
-              .map(
-                (e) =>
-                  `<p class="receipt">${stamp(e.at)} · ${esc(state.flavors.find((f) => f.id === e.flavorId)?.name)} · ${{ receive: "Recebimento", loss: "Perda", adjust: "Ajuste" }[e.kind]}: ${e.qty} · ${esc(e.reason)}</p>`,
-              )
-              .join(
-                "",
-              )}</details><details><summary>Reservas processadas</summary>${
-              state.reservations
-                .filter((r) => r.dayId === day.id && r.status !== "pending")
-                .map(
-                  (r) =>
-                    `<p class="receipt">${esc(r.customer)} · ${esc(r.location)} · ${r.status === "completed" ? "Concluída" : "Cancelada"} · ${stamp(r.finishedAt)}</p>`,
-                )
-                .join("") || '<p class="muted">Nenhuma.</p>'
-            }</details></div></details>`;
-          })
-          .join("") ||
-        '<p class="empty">Seu histórico aparecerá após abrir o primeiro dia.</p>'
-      }`;
+  } else if (tab === "historico") {
+    app.innerHTML = renderHistory(state, { money, esc, stamp, clock });
     $("#backup").onclick = () => download(state);
-    document
-      .querySelectorAll("[data-payment]")
-      .forEach(
-        (b) => (b.onclick = () => payment("payment", b.dataset.payment)),
-      );
-    document
-      .querySelectorAll("[data-void]")
-      .forEach((b) => (b.onclick = () => voidSale(b.dataset.void)));
+    for (const details of app.querySelectorAll("[data-disclosure]")) {
+      if (disclosures.has(details.dataset.disclosure))
+        details.open = disclosures.get(details.dataset.disclosure);
+    }
   }
 }
-const ui=createOperationsUI({getState:()=>state,setState:v=>state=v,getBusy:()=>busy,setBusy:v=>busy=v,modal,bindForm,money,esc,stamp,toast,download,openDay,editFlavor,render,channel});
-document.querySelectorAll("[data-tab]").forEach(
-  (b) =>
-    (b.onclick = () => {
-      tab = b.dataset.tab;
-      render();
-      window.scrollTo(0, 0);
-    }),
-);
-$("#settings").onclick = settings;
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(b?.dataset.editReservation)sale(true,b.dataset.editReservation);if(b?.dataset.refund)payment('refund',b.dataset.refund);});
+
+let pendingSync = false;
+let pendingLock = false;
+function setBusy(value) {
+  busy = value;
+  if (busy) return;
+  if (pendingLock) access.lock();
+  if (pendingSync) queueMicrotask(sync);
+  pendingLock = false;
+  pendingSync = false;
+}
+const access = createAccess({
+  modal, esc, getBusy: () => busy, setBusy,
+  channel, onUnlock: () => refresh().catch((e) => toast(e.message)),
+  onLock: () => {
+    state = undefined;
+    disclosures.clear();
+    $("#app").replaceChildren();
+    $("#dialog-body").replaceChildren();
+    $("#toast").classList.remove("show");
+    $("#toast").textContent = "";
+  },
+});
+const ui = createOperationsUI({
+  getState: () => state, setState: (value) => { state = value; },
+  getBusy: () => busy, setBusy,
+  modal, bindForm, money, esc, stamp, toast, download, openDay, editFlavor, render, channel, access,
+});
+document.querySelectorAll("[data-tab]").forEach((b) => {
+  b.onclick = () => navigate(b.dataset.tab);
+});
+$(".brand").onclick = (e) => {
+  e.preventDefault();
+  navigate("hoje");
+};
+$("#settings").onclick = () => ui.settings();
+$("#app").addEventListener("click", (e) => {
+  const button = e.target.closest("button");
+  if (!button || access.locked) return;
+  const actions = {
+    editReservation: (id) => sale(true, id), cancel, complete: (id) => payment("complete", id),
+    payment: (id) => payment("payment", id), void: voidSale, refund: (id) => payment("refund", id),
+  };
+  const action = Object.keys(actions).find((name) => Object.hasOwn(button.dataset, name));
+  if (action) actions[action](button.dataset[action]);
+});
 function connection() {
   $("#connection").textContent = navigator.onLine
     ? "● Dados salvos neste aparelho"
@@ -357,26 +435,49 @@ function connection() {
 }
 window.addEventListener("online", connection);
 window.addEventListener("offline", connection);
+let renderedDate;
 async function refresh() {
-  if (!busy) {
-    state = await read();
-    render();
-  }
-}
-if (channel) channel.onmessage = () => refresh().catch((e) => toast(e.message));
-setInterval(()=>{if(!dialog.open&&!busy&&state)render();},60000);
-window.addEventListener("focus", () =>
-  refresh().catch((e) => toast(e.message)),
-);
-try {
-  state = await read();
+  if (busy) return;
+  await access.refresh();
+  if (access.locked) return;
+  const data = await read();
+  if (busy || access.locked) return;
+  const date = localDate();
+  if (renderedDate === date && JSON.stringify(state) === JSON.stringify(data)) return;
+  state = data;
+  renderedDate = date;
   render();
+}
+const sync = () => refresh().catch((e) => toast(e.message));
+if (channel) channel.onmessage = ({ data }) => {
+  if (busy) {
+    pendingSync = true;
+    pendingLock ||= data === "locked";
+    return;
+  }
+  if (data === "locked") access.lock();
+  else sync();
+};
+function adjustViewport() {
+  const viewport = window.visualViewport;
+  document.documentElement.style.setProperty("--visible-height", `${viewport.height}px`);
+  document.documentElement.style.setProperty("--keyboard-inset",
+    `${Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)}px`);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", adjustViewport);
+  window.visualViewport.addEventListener("scroll", adjustViewport);
+  adjustViewport();
+}
+setInterval(() => { if (!dialog.open && renderedDate !== localDate()) sync(); }, 60000);
+window.addEventListener("focus", sync);
+try {
+  await refresh();
   connection();
   if ("serviceWorker" in navigator)
-    navigator.serviceWorker
-      .register("./sw.js")
+    navigator.serviceWorker.register("./sw.js")
       .catch(() => toast("Modo offline indisponível. Use HTTPS ou localhost."));
 } catch (e) {
-  $("#app").textContent =
+  $(access.locked ? "#access-screen" : "#app").textContent =
     "Não foi possível abrir o banco de dados: " + e.message;
 }

@@ -1,41 +1,215 @@
-import {opened,stock,total,METHODS,localDate,businessDate,parseBackup} from './domain.js';
-import {read,restore,recoveryCopies} from './db.js';
+import { opened, stock, total, METHODS, localDate, businessDate, parseBackup, financial } from "./domain.js";
+import { read, restore, recoveryCopies } from "./db.js";
+import { displayDate } from "./history-ui.js";
 
 export function createOperationsUI(ctx) {
-  const {modal,bindForm,money,esc,stamp,toast,download,openDay,editFlavor}=ctx;
-  const $=s=>document.querySelector(s);
-  const options=(pending=false)=>[...METHODS,...(pending?['Pendente']:[])].map(m=>`<option>${m}</option>`).join('');
-  function sale(reserve=false,reservationId){
-    const state=ctx.getState(),d=opened(state);if(!d)return openDay();
-    const r=state.reservations.find(r=>r.id===reservationId);
-    const flavors=state.flavors.filter(f=>f.active||r?.items.some(i=>i.flavorId===f.id));
-    const price=f=>r?.items.find(i=>i.flavorId===f.id)?.price??f.price;
-    const selected=fd=>flavors.map(f=>({flavorId:f.id,qty:Number(fd.get('qty_'+f.id)||0)})).filter(i=>i.qty>0);
-    const controls=flavors.map(f=>{const qty=r?.items.find(i=>i.flavorId===f.id)?.qty||0,max=stock(state,d.id,f.id).available+qty;return `<div class="picker-row"><div><strong>${esc(f.name)}</strong><small>${money(price(f))} · até ${max} un.</small></div><div class="stepper"><button type="button" data-step="-1" data-flavor="${esc(f.id)}" aria-label="Diminuir ${esc(f.name)}" ${qty?'':'disabled'}>−</button><input readonly aria-label="Quantidade de ${esc(f.name)}" name="qty_${esc(f.id)}" value="${qty}" data-max="${max}" inputmode="none"><button type="button" data-step="1" data-flavor="${esc(f.id)}" aria-label="Adicionar ${esc(f.name)}" ${qty>=max?'disabled':''}>+</button></div></div>`;}).join('');
-    modal(r?'Editar reserva':reserve?'Nova reserva':'Venda rápida',`<form class="sale-form"><div class="form-items">${controls}</div>${reserve?`<label>Cliente<input name="customer" value="${esc(r?.customer||'')}" required maxlength="100" autocomplete="name"></label><label>Retirada<input name="location" value="${esc(r?.location||'')}" required list="locations" maxlength="120" placeholder="Escolha ou digite um local"></label><datalist id="locations"><option>Central</option><option>Bloco K</option><option>Bloco C</option><option>Restaurante</option><option>Pátio</option></datalist><p class="muted">Sabores já reservados mantêm o preço; novos sabores usam o preço atual.</p>`:'<details><summary>Adicionar nome do cliente (opcional)</summary><label>Cliente<input name="customer" maxlength="100" autocomplete="name"></label></details>'}<div class="sale-footer">${reserve?'':`<label>Pagamento<select name="method">${options(true)}</select></label>`}<div class="total"><span>Total</span><strong id="sale-total" aria-live="polite">R$ 0,00</strong></div><p class="error" role="alert"></p><button class="primary wide" type="submit">${r?'Salvar alterações':reserve?'Confirmar reserva':'Confirmar venda'}</button></div></form>`);
-    const f=$('#dialog-body form');
-    const update=()=>{const items=selected(new FormData(f));$('#sale-total').textContent=money(items.reduce((a,i)=>a+i.qty*price(flavors.find(f=>f.id===i.flavorId)),0));f.querySelector('[type=submit]').disabled=!items.length;};
-    f.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>{const input=f.elements.namedItem('qty_'+b.dataset.flavor);input.value=Math.max(0,Math.min(Number(input.dataset.max),Number(input.value)+Number(b.dataset.step)));const box=b.parentElement;box.querySelector('[data-step="-1"]').disabled=Number(input.value)===0;box.querySelector('[data-step="1"]').disabled=Number(input.value)>=Number(input.dataset.max);update();});
-    bindForm(fd=>({type:r?'edit-reservation':reserve?'reserve':'sale',reservationId:r?.id,expectedRevision:r?.revision||0,items:selected(fd),customer:fd.get('customer'),location:fd.get('location'),method:fd.get('method')}));update();
+  const { modal, bindForm, money, esc, stamp, toast, download, openDay, editFlavor, access } = ctx;
+  const $ = (s) => document.querySelector(s);
+  const options = (pending = false) => [...METHODS, ...(pending ? ["Pendente"] : [])]
+    .map((m) => `<option>${m}</option>`).join("");
+
+  function sale(reserve = false, reservationId) {
+    const state = ctx.getState(), day = opened(state);
+    if (!day) return openDay();
+    const reservation = state.reservations.find((r) => r.id === reservationId);
+    const entries = state.flavors.flatMap((flavor) => {
+      const old = reservation?.items.find((i) => i.flavorId === flavor.id);
+      const available = stock(state, day.id, flavor.id).available;
+      if (!old && (!flavor.active || !available)) return [];
+      return [{ flavor, qty: old?.qty ?? 0, max: available + (old?.qty ?? 0), price: old?.price ?? flavor.price }];
+    });
+    const title = reservation ? "Editar reserva" : reserve ? "Nova reserva" : "Venda rápida";
+    if (!entries.length) {
+      modal(title, '<p class="note">Sem unidades livres. Confira o estoque em Hoje ou conclua uma retirada na aba Reservas.</p>');
+      return;
+    }
+    const controls = entries.map(({ flavor, qty, max, price }, index) =>
+      `<div class="picker-row"><div><strong>${esc(flavor.name)}</strong><small>${money(price)} · até ${max} un.</small></div>
+        <div class="stepper">
+          <button type="button" data-step="-1" data-pick="${index}" aria-label="Diminuir ${esc(flavor.name)}" ${qty ? "" : "disabled"}>−</button>
+          <input readonly tabindex="-1" aria-label="Quantidade de ${esc(flavor.name)}" name="qty_${index}" value="${qty}" inputmode="none">
+          <button type="button" data-step="1" data-pick="${index}" aria-label="Adicionar ${esc(flavor.name)}" ${qty >= max ? "disabled" : ""}>+</button>
+        </div></div>`).join("");
+    const customer = `<label>Cliente<input name="customer" value="${esc(reservation?.customer ?? "")}" ${reserve ? "required" : ""} maxlength="100" autocomplete="name"></label>`;
+    const customerFields = reserve
+      ? `${customer}<label>Retirada<input name="location" value="${esc(reservation?.location ?? "")}" required list="locations" maxlength="120" placeholder="Escolha ou digite um local"></label>
+        <datalist id="locations"><option>Central</option><option>Bloco K</option><option>Bloco C</option><option>Restaurante</option><option>Pátio</option></datalist>
+        ${reservation ? '<p class="muted">Sabores já reservados mantêm o preço original.</p>' : ""}`
+      : `<details><summary>Adicionar nome do cliente</summary>${customer}</details>`;
+    modal(title, `<form class="sale-form">
+      <div class="sale-scroll"><div class="picker-list">${controls}</div>${customerFields}</div>
+      <div class="sale-footer">${reserve ? "" : `<label class="sale-method">Pagamento<select name="method" aria-label="Pagamento">${options(true)}</select></label>`}
+        <div class="total"><span>Total</span><strong id="sale-total" aria-live="polite">${money(0)}</strong></div>
+        <p class="error" role="alert"></p>
+        <button class="primary wide" type="submit">${reservation ? "Salvar alterações" : reserve ? "Confirmar reserva" : "Confirmar venda"}</button>
+      </div></form>`);
+
+    const form = $("#dialog-body form");
+    const selected = (fd) => entries.flatMap(({ flavor, price }, index) => {
+      const qty = Number(fd.get("qty_" + index));
+      return qty ? [{ flavorId: flavor.id, qty, price }] : [];
+    });
+    function update() {
+      const items = selected(new FormData(form));
+      $("#sale-total").textContent = money(total(items));
+      form.querySelector("[type=submit]").disabled = !items.length;
+    }
+    form.querySelectorAll("[data-pick]").forEach((button) => {
+      button.onclick = () => {
+        const index = Number(button.dataset.pick), max = entries[index].max;
+        const input = form.elements.namedItem("qty_" + index);
+        const qty = Math.max(0, Math.min(max, Number(input.value) + Number(button.dataset.step)));
+        input.value = qty;
+        const stepper = button.parentElement;
+        const decrease = stepper.querySelector('[data-step="-1"]');
+        const increase = stepper.querySelector('[data-step="1"]');
+        decrease.disabled = qty === 0;
+        increase.disabled = qty >= max;
+        if (button.disabled) {
+          const other = button === increase ? decrease : increase;
+          if (!other.disabled) other.focus({ preventScroll: true });
+        }
+        update();
+      };
+    });
+    bindForm((fd) => ({
+      type: reservation ? "edit-reservation" : reserve ? "reserve" : "sale",
+      reservationId: reservation?.id, expectedRevision: reservation?.revision ?? 0,
+      items: selected(fd), customer: fd.get("customer"), location: fd.get("location"), method: fd.get("method"),
+    }));
+    update();
   }
-  function payment(type,id){
-    const state=ctx.getState(),d=opened(state),v=state.sales.find(v=>v.id===id);
-    if(!d){modal('Abra um dia para receber',`<p>O pagamento será registrado no novo dia operacional, sem alterar a venda antiga. Abra o dia e volte a Pendências no Histórico.</p><button class="primary wide" id="open-for-payment">Abrir dia de vendas</button>`);$('#open-for-payment').onclick=openDay;return;}
-    modal(type==='complete'?'Concluir reserva':type==='refund'?'Registrar reembolso':'Receber pagamento',`<form>${v?`<p><strong>${esc(v.customer||'Venda no balcão')}</strong> · ${money(total(v.items))}<br><span class="muted">Venda de ${stamp(v.at)}. ${type==='refund'?'Saída':'Entrada'} no dia operacional ${businessDate(d)}.</span></p>`:''}${businessDate(d)!==localDate()?'<p class="note">O dia aberto é anterior à data atual. Feche-o e abra o dia atual se o recebimento pertence a hoje.</p>':''}${type==='refund'?'<p class="note">Confirme apenas depois de devolver efetivamente o dinheiro ao cliente.</p>':''}<label>Forma de ${type==='refund'?'reembolso':'pagamento'}<select name="method">${options(type==='complete')}</select></label><p class="error" role="alert"></p><button class="primary" type="submit">${type==='refund'?'Confirmar valor devolvido':'Confirmar'}</button></form>`);
-    bindForm(fd=>({type,reservationId:id,saleId:id,method:fd.get('method')}));
+
+  function payment(type, id) {
+    const state = ctx.getState(), day = opened(state);
+    const refund = type === "refund";
+    const complete = type === "complete";
+    const title = refund ? "Registrar reembolso" : complete ? "Concluir reserva" : "Receber pagamento";
+    const entry = (complete ? state.reservations : state.sales).find((v) => v.id === id);
+    if (!entry) return;
+    if (!day) {
+      modal(refund ? "Abra um dia para registrar o reembolso" : "Abra um dia para receber",
+        `<p>${refund ? "A devolução" : "O pagamento"} entra no caixa do novo dia. Depois de abrir, volte a Pendências no Histórico.</p>
+        <button class="primary wide" id="open-for-payment">Abrir dia de vendas</button>`);
+      $("#open-for-payment").onclick = openDay;
+      return;
+    }
+    const business = businessDate(day);
+    const cashImpact = refund ? "Saída no caixa" : complete ? "Se receber agora, a entrada fica no caixa" : "Entrada no caixa";
+    modal(title, `<form>
+      <p><strong>${esc(entry.customer || "Venda no balcão")}</strong> · ${money(total(entry.items))}<br>
+      <span class="muted">${complete ? "Reserva" : "Venda"} de ${stamp(entry.at)}. ${cashImpact} de ${displayDate(business)}.</span></p>
+      ${business !== localDate() ? '<p class="note">O dia aberto é anterior à data atual. Se o lançamento pertence a hoje, feche-o e abra o dia atual.</p>' : ""}
+      ${refund ? '<p class="note">Confirme depois de devolver efetivamente o dinheiro ao cliente.</p>' : ""}
+      <label>Forma de ${refund ? "reembolso" : "pagamento"}<select name="method" aria-label="Forma de ${refund ? "reembolso" : "pagamento"}">${options(complete)}</select></label>
+      <p class="error" role="alert"></p><button class="primary" type="submit">${refund ? "Confirmar valor devolvido" : "Confirmar"}</button>
+      </form>`);
+    bindForm((fd) => ({ type, reservationId: id, saleId: id, method: fd.get("method") }));
   }
-  function settings(){
-    const state=ctx.getState();
-    modal('Seu negócio',`<h3>Sabores e preços</h3><div>${state.flavors.map(f=>`<div class="row"><span>${esc(f.name)}<small class="receipt"> · ${money(f.price)}${f.active?'':' · inativo'}</small></span><button data-edit="${esc(f.id)}">Editar</button></div>`).join('')}</div><button class="wide" id="add-flavor">+ Adicionar sabor</button><h3 style="margin-top:24px">Proteção dos dados</h3><p class="muted">Os dados ficam neste navegador. Baixar um arquivo não garante que ele foi salvo. Confira o arquivo no app Arquivos ou na pasta Downloads.</p><div class="actions"><button id="export">Exportar backup</button><button id="import">Restaurar JSON</button><button id="recovery">Cópias anteriores à restauração</button></div><input hidden type="file" id="file" accept=".json,application/json"><p id="backup-error" class="error" role="alert"></p><p class="install">No iPhone: Safari → Compartilhar → Adicionar à Tela de Início.</p>`);
-    document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editFlavor(b.dataset.edit));$('#add-flavor').onclick=()=>editFlavor();$('#export').onclick=async()=>{try{download(await read());toast('Download solicitado. Confira se o arquivo foi salvo.');}catch(e){$('#backup-error').textContent=e.message;}};$('#import').onclick=()=>$('#file').click();
-    $('#recovery').onclick=async()=>{try{const copies=await recoveryCopies();modal('Cópias de recuperação',`<p class="muted">Cada restauração guarda uma cópia independente no aparelho. Exporte a desejada e use Restaurar JSON para recuperá-la. Cópias locais não substituem um backup externo.</p>${copies.map((c,i)=>`<div class="row"><span>${c.at?stamp(c.at):'Cópia da versão anterior'} · ${c.data.sales.length} vendas</span><button data-copy="${i}">Exportar</button></div>`).join('')||'<p>Nenhuma restauração realizada.</p>'}`);document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{download(copies[Number(b.dataset.copy)].data);toast('Download solicitado. Confira o arquivo salvo.');});}catch(e){toast(e.message);}};
-    $('#file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>10000000)throw new Error('Backup maior que 10 MB.');const data=parseBackup(await file.text()),before=await read();restoreReview(data,before);}catch(err){$('#backup-error').textContent=err.message;}};
+
+  function settings() {
+    const state = ctx.getState();
+    modal("Configurações", `<h3>Sabores e preços</h3><div>
+      ${state.flavors.map((f) => `<div class="row"><span>${esc(f.name)}<small class="receipt"> · ${money(f.price)}${f.active ? "" : " · inativo"}</small></span>
+        <button data-edit="${esc(f.id)}">Editar</button></div>`).join("")}</div>
+      <button class="wide" id="add-flavor">＋ Adicionar sabor</button>
+      <section class="settings-section"><h3>Senha de acesso</h3>
+        <p class="muted">Bloqueio da interface neste navegador. Funciona offline e mantém o JSON legível.</p>
+        <div class="actions"><button id="configure-access">${access.enabled ? "Alterar senha" : "Configurar senha"}</button>
+          ${access.enabled ? '<button id="lock-access">Bloquear agora</button>' : ""}</div></section>
+      <section class="settings-section"><h3>Backup</h3>
+        <p class="muted">Confirme o download no app Arquivos ou na pasta Downloads.</p>
+        <div class="actions"><button id="export">Exportar backup</button><button id="import">Restaurar JSON</button>
+          <button id="recovery">Cópias anteriores à restauração</button></div>
+        <input hidden type="file" id="file" accept=".json,application/json">
+        <p id="backup-error" class="error" role="alert"></p></section>`);
+
+    $("#dialog-body").querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => editFlavor(b.dataset.edit));
+    $("#add-flavor").onclick = () => editFlavor();
+    $("#configure-access").onclick = () => access.passwordForm(access.enabled ? "change" : "setup");
+    if (access.enabled) $("#lock-access").onclick = () => { if (!ctx.getBusy()) access.lock({ notify: true }); };
+
+    const file = $("#file");
+    const error = $("#backup-error");
+    const visible = () => file.isConnected && $("#dialog").open && !access.locked;
+    $("#export").onclick = async () => {
+      try {
+        const data = await read();
+        if (visible()) {
+          download(data);
+          toast("Download solicitado. Confira se o arquivo foi salvo.");
+        }
+      } catch (err) { error.textContent = err.message; }
+    };
+    $("#import").onclick = () => file.click();
+    $("#recovery").onclick = async () => {
+      try {
+        const copies = await recoveryCopies();
+        if (!visible()) return;
+        modal("Cópias de recuperação", `<p class="muted">Cada restauração guarda uma cópia independente neste aparelho.
+          Para recuperar, exporte a cópia desejada e use Restaurar JSON.</p>
+          ${copies.map((c, i) => `<div class="row"><span>${c.at ? stamp(c.at) : "Cópia da versão anterior"} · ${c.data.sales.length} vendas</span><button data-copy="${i}">Exportar</button></div>`).join("") || "<p>Nenhuma restauração realizada.</p>"}`);
+        $("#dialog-body").querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => {
+          download(copies[Number(b.dataset.copy)].data);
+          toast("Download solicitado. Confira se o arquivo foi salvo.");
+        });
+      } catch (err) { error.textContent = err.message; }
+    };
+    file.onchange = async () => {
+      if (!file.files[0]) return;
+      try {
+        const data = parseBackup(await file.files[0].text());
+        const before = await read();
+        if (visible()) previewRestore(data, before);
+      } catch (err) { error.textContent = err.message; }
+    };
   }
-  function restoreReview(data,before){
-    modal('Conferir restauração',`<p><strong>Dados atuais:</strong> ${before.days.length} dias, ${before.sales.length} vendas.</p><p><strong>Arquivo escolhido:</strong> ${data.days.length} dias, ${data.sales.length} vendas, ${data.reservations.length} reservas.</p><p class="note">Esta ação substitui o estado atual. Todas as cópias de recuperação já existentes serão preservadas, e uma nova cópia será gravada na mesma transação. Se essa gravação falhar, nada será substituído.</p><button id="export-before">Baixar backup dos dados atuais</button><p class="muted" id="download-status">O aplicativo não consegue confirmar se um download foi salvo. Confira o arquivo fora do app antes de continuar.</p><label class="confirmation"><input type="checkbox" id="restore-consent">Entendo que os dados atuais serão substituídos pelo arquivo escolhido e confirmo a restauração.</label><button class="danger wide" id="restore" disabled>Substituir dados e restaurar</button><button id="cancel-restore">Cancelar</button><p class="error" role="alert" id="restore-error"></p>`);
-    $('#export-before').onclick=()=>{try{download(before);$('#download-status').textContent='Download solicitado, não confirmado. Verifique o arquivo salvo em Arquivos/Downloads.';}catch(e){$('#restore-error').textContent=e.message;}};
-    $('#restore-consent').onchange=()=>{$('#restore').disabled=!$('#restore-consent').checked;};$('#cancel-restore').onclick=()=>{if(!ctx.getBusy())$('#dialog').close();};
-    $('#restore').onclick=async()=>{if(ctx.getBusy()||!$('#restore-consent').checked)return;ctx.setBusy(true);$('#dialog-body').querySelectorAll('button,input').forEach(el=>el.disabled=true);try{ctx.setState(await restore(data,{confirmed:true,expectedState:JSON.stringify(before)}));ctx.channel?.postMessage('changed');$('#dialog').close();ctx.render();toast('Restaurado. Cópia anterior preservada no aparelho.');}catch(err){$('#restore-error').textContent=err.message;}finally{ctx.setBusy(false);$('#dialog-body').querySelectorAll('button,input').forEach(el=>el.disabled=false);if($('#restore-consent')){$('#restore-consent').checked=false;$('#restore').disabled=true;}}};
+
+  function previewRestore(data, before) {
+    const summary = (snapshot) => {
+      const n = financial(snapshot);
+      return `${snapshot.days.length} dias, ${snapshot.sales.length} vendas, ${snapshot.reservations.length} reservas.
+        Vendas após estornos ${money(n.gross)} · Caixa líquido ${money(n.cashNet)} · A receber ${money(n.pending)} · A reembolsar ${money(n.refundPending)}.`;
+    };
+    modal("Conferir restauração", `<p><strong>Dados atuais</strong><br>${summary(before)}</p>
+      <p><strong>Arquivo escolhido</strong><br>${summary(data)}</p>
+      <p class="note">A restauração substitui os dados operacionais. O aplicativo guarda uma cópia dos dados atuais na mesma gravação e preserva as cópias anteriores. A senha local continua ativa neste aparelho.</p>
+      <button id="export-before">Baixar backup dos dados atuais</button>
+      <p class="muted" id="download-status">Confira se o backup abriu no app Arquivos ou na pasta Downloads.</p>
+      <label class="confirmation"><input type="checkbox" id="restore-consent">Confirmo a substituição dos dados atuais pelo arquivo escolhido.</label>
+      <button class="danger wide" id="restore" disabled>Substituir dados e restaurar</button><button id="cancel-restore">Cancelar</button>
+      <p class="error" role="alert" id="restore-error"></p>`);
+    $("#export-before").onclick = () => {
+      try {
+        download(before);
+        $("#download-status").textContent = "Download solicitado. Verifique o arquivo salvo em Arquivos/Downloads.";
+      } catch (err) { $("#restore-error").textContent = err.message; }
+    };
+    const consent = $("#restore-consent");
+    const confirm = $("#restore");
+    consent.onchange = () => { confirm.disabled = !consent.checked; };
+    $("#cancel-restore").onclick = () => { if (!ctx.getBusy()) $("#dialog").close(); };
+    confirm.onclick = async () => {
+      if (ctx.getBusy() || access.locked || !consent.checked) return;
+      ctx.setBusy(true);
+      const controls = $("#dialog-body").querySelectorAll("button, input");
+      controls.forEach((el) => { el.disabled = true; });
+      try {
+        ctx.setState(await restore(data, { confirmed: true, expectedState: JSON.stringify(before) }));
+        ctx.channel?.postMessage("changed");
+        $("#dialog").close();
+        ctx.render();
+        toast("Restaurado. Cópia anterior preservada no aparelho.");
+      } catch (err) {
+        $("#restore-error").textContent = err.message;
+      } finally {
+        controls.forEach((el) => { el.disabled = false; });
+        consent.checked = false;
+        confirm.disabled = true;
+        ctx.setBusy(false);
+      }
+    };
   }
-  return {sale,payment,settings};
+
+  return { sale, payment, settings };
 }

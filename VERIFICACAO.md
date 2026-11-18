@@ -1,6 +1,13 @@
-# Verificação da entrega — 15/11/2026
+# Verificação da entrega — 18/11/2026
 
-## Revisão P0/P1/P2 — resultado atual
+- `npm test`: 36 testes aprovados. Os novos testes cobrem transferência de estoque, intervalo entre dias, transações concorrentes e reenvios, estoque reservado, caixa em dias distintos e restauração legada com a senha local preservada.
+- `npm run build`: aprovado. O pacote contém o código-fonte e a aplicação estática em `dist/`.
+- Chromium em 390 × 844 e 320 × 568, usando somente dados fictícios. Verificados alinhamento dos cartões, bloqueio de vendas de estoque reservado, divulgação, fechamento e abertura com 3 sobras mais 5 recebidas, Histórico, estorno, reembolso e recebimento em outro dia, restauração legada com cópia, desbloqueio e recuperação da senha e recarga offline.
+- Validação restante no iPhone físico: Safari e PWA na Tela de Início, VoiceOver, teclado e área segura, ergonomia com uma mão, importação e exportação por Arquivos, atualização instalada e modo avião.
+
+## Registro de verificação anterior — 15/11/2026
+
+### Revisão P0/P1/P2
 
 **30 testes aprovados, 0 falhas**, build de produção aprovado e sintaxe dos módulos verificada. As seções de etapas abaixo registram a entrega original de 14 testes.
 

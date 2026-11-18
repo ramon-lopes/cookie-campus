@@ -22,6 +22,32 @@ export async function read() {
 export async function mutate(command) {
   return transaction((s) => apply(s, command));
 }
+export async function readAccess() {
+  const db = await connect();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("app", "readonly").objectStore("app").get("local-access");
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => reject(request.error);
+  });
+}
+export async function writeAccess(next, expectedId) {
+  const db = await connect();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("app", "readwrite"), store = tx.objectStore("app");
+    let conflict;
+    const request = store.get("local-access");
+    request.onsuccess = () => {
+      if ((request.result?.id ?? null) !== expectedId) {
+        conflict = new Error("A configuração de senha mudou em outra aba. Abra a tela novamente.");
+        tx.abort();
+        return;
+      }
+      store.put(next, "local-access");
+    };
+    tx.oncomplete = resolve;
+    tx.onabort = () => reject(conflict || tx.error || new Error("Não foi possível salvar a senha."));
+  });
+}
 export async function restore(data, { confirmed = false, expectedState } = {}) {
   if (confirmed !== true || typeof expectedState !== "string")
     throw new Error("Confirme explicitamente a substituição dos dados.");
