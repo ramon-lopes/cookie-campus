@@ -30,12 +30,25 @@ export function localDate(at = new Date()) {
 // Old labels were UTC dates. Derive their commercial date without rewriting stored history.
 export const businessDate = (day) =>
   day.businessDate || localDate(day.openedAt);
+// Days are appended by the open transaction, even when they share a date.
+export function nextOpening(s) {
+  const previous = s.days.at(-1);
+  return {
+    previousDayId: previous?.id ?? null,
+    source: previous?.closedAt && previous.carryover &&
+      Object.keys(previous.carryover).length ? previous : null,
+  };
+}
+
 export function stock(s, dayId, flavorId) {
   const moves = s.events.filter(
     (e) => e.dayId === dayId && e.flavorId === flavorId,
   );
   const received = moves
     .filter((e) => e.kind === "receive")
+    .reduce((a, e) => a + e.qty, 0);
+  const carried = moves
+    .filter((e) => e.kind === "carryover")
     .reduce((a, e) => a + e.qty, 0);
   const losses = moves
     .filter((e) => e.kind === "loss")
@@ -55,11 +68,12 @@ export function stock(s, dayId, flavorId) {
     .reduce((a, i) => a + i.qty, 0);
   return {
     received,
+    carried,
     losses,
     adjustments,
     sold,
     reserved,
-    available: received + adjustments - losses - sold - reserved,
+    available: received + carried + adjustments - losses - sold - reserved,
   };
 }
 export const total = (items) => items.reduce((a, i) => a + i.qty * i.price, 0);
@@ -152,6 +166,8 @@ export function apply(state, cmd) {
   const s = structuredClone(state),
     at = cmd.at || new Date().toISOString();
   let d = opened(s);
+  if (cmd.expectedDayId !== undefined && cmd.expectedDayId !== (d?.id ?? null))
+    fail("O dia aberto mudou. Feche este formulário e confira a operação novamente.");
   const needDay = () => {
     if (!d) fail("Abra um dia de vendas primeiro.");
     return d;
@@ -185,6 +201,10 @@ export function apply(state, cmd) {
     }
     case "open": {
       if (d) fail("Já existe um dia aberto.");
+      const { previousDayId, source } = nextOpening(s);
+      if (cmd.expectedPreviousDayId !== undefined &&
+          cmd.expectedPreviousDayId !== previousDayId)
+        fail("O histórico de dias mudou. Feche e confira a abertura novamente.");
       d = {
         id: cmd.id,
         label: localDate(at),
@@ -193,6 +213,18 @@ export function apply(state, cmd) {
         closedAt: null,
       };
       s.days.push(d);
+      for (const [flavorId, qty] of Object.entries(source?.carryover ?? {})) {
+        s.events.push({
+          id: `${cmd.id}:carryover:${flavorId}`,
+          dayId: d.id,
+          sourceDayId: source.id,
+          flavorId,
+          kind: "carryover",
+          qty,
+          reason: "Sobras confirmadas no fechamento",
+          at,
+        });
+      }
       for (const i of cmd.items || []) {
         requireInt(i.qty);
         if (!s.flavors.some((f) => f.id === i.flavorId && f.active))
@@ -204,7 +236,7 @@ export function apply(state, cmd) {
             flavorId: i.flavorId,
             kind: "receive",
             qty: i.qty,
-            reason: "Estoque inicial",
+            reason: "Recebimento na abertura",
             at,
           });
       }
@@ -367,15 +399,25 @@ export function apply(state, cmd) {
         s.reservations.some((r) => r.dayId === d.id && r.status === "pending")
       )
         fail("Conclua ou cancele as reservas pendentes.");
+      const selected = cmd.carryover ?? {};
+      const carryover = [];
       for (const f of s.flavors) {
-        requireInt(cmd.counts?.[f.id]);
+        requireInt(Object.hasOwn(cmd.counts ?? {}, f.id) ? cmd.counts[f.id] : undefined);
         if (cmd.counts[f.id] !== stock(s, d.id, f.id).available)
           fail(
             `Divergência em ${f.name}. Registre uma perda ou ajuste antes de fechar.`,
           );
+        const qty = Object.hasOwn(selected, f.id) ? selected[f.id] : 0;
+        requireInt(qty);
+        if (qty > cmd.counts[f.id])
+          fail(`Sobras de ${f.name} acima da contagem física.`);
+        if (qty) carryover.push([f.id, qty]);
       }
+      if (Object.keys(selected).some((id) => !s.flavors.some((f) => f.id === id)))
+        fail("Sabor inválido nas sobras.");
       d.closedAt = at;
       d.counts = structuredClone(cmd.counts);
+      d.carryover = Object.fromEntries(carryover);
       break;
     }
     default:
@@ -530,11 +572,12 @@ export function validate(s) {
       !day(e.dayId) ||
       !flavor(e.flavorId) ||
       typeof e.reason !== "string" ||
-      !["receive", "loss", "adjust"].includes(e.kind) ||
+      !["receive", "loss", "adjust", "carryover"].includes(e.kind) ||
       !integer(e.qty, e.kind === "adjust" ? -1000000 : 1)
     )
       fail("Movimento inválido.");
   }
+  validateCarryover(s);
   for (const d of s.days)
     if (d.closedAt) {
       if (!d.counts || typeof d.counts !== "object" || Array.isArray(d.counts))
@@ -571,6 +614,34 @@ export function validate(s) {
   }
   return s;
 }
+
+function validateCarryover(s) {
+  const incoming = new Map();
+  for (const e of s.events) {
+    if (e.kind !== "carryover") continue;
+    if (!incoming.has(e.dayId)) incoming.set(e.dayId, []);
+    incoming.get(e.dayId).push(e);
+  }
+  for (const [index, day] of s.days.entries()) {
+    const selected = day.carryover;
+    if (selected !== undefined &&
+        (!day.closedAt || !selected || typeof selected !== "object" || Array.isArray(selected)))
+      fail("Sobras sem fechamento válido.");
+    for (const [id, qty] of Object.entries(selected ?? {})) {
+      if (!Object.hasOwn(day.counts ?? {}, id) || !integer(qty, 1) || qty > day.counts[id])
+        fail("Sobras acima da contagem registrada ou sabor inválido.");
+    }
+    const previous = s.days[index - 1];
+    const expected = Object.entries(previous?.carryover ?? {});
+    const transfers = incoming.get(day.id) ?? [];
+    if (transfers.length !== expected.length ||
+        expected.some(([flavorId, qty]) => transfers.filter((e) =>
+          e.flavorId === flavorId && e.sourceDayId === previous.id && e.qty === qty &&
+          e.at === day.openedAt).length !== 1))
+      fail("Reaproveitamento inconsistente: confira a origem e as quantidades.");
+  }
+}
+
 export function parseBackup(text) {
   let b;
   try {
