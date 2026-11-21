@@ -1,4 +1,8 @@
 export const METHODS = ["Pix", "Dinheiro", "Débito", "Crédito"];
+export const PICKUP_LOCATIONS = [
+  "Bloco C", "Bloco D", "Bloco I Central", "Bloco K", "Educação Física",
+  "Farmácia", "Odonto", "Pátio/Cantina",
+];
 export const initial = () => ({
   version: 1,
   flavors: [
@@ -22,7 +26,10 @@ const fail = (m) => {
 const integer = (n, min = 0) => Number.isSafeInteger(n) && n >= min;
 const requireInt = (n, min = 0) =>
   integer(n, min) || fail("Informe uma quantidade inteira válida.");
+const date = (v) => typeof v === "string" && Number.isFinite(Date.parse(v));
 export const opened = (s) => s.days.find((d) => !d.closedAt);
+export const reservationPayment = (s, id) => s.payments.find((p) => p.reservationId === id);
+export const usesHeldStock = (r) => Boolean(r?.finishedDayId && r.finishedDayId !== r.dayId);
 export function localDate(at = new Date()) {
   const d = new Date(at);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -56,13 +63,19 @@ export function stock(s, dayId, flavorId) {
   const adjustments = moves
     .filter((e) => e.kind === "adjust")
     .reduce((a, e) => a + e.qty, 0);
-  const sold = s.sales
-    .filter((v) => v.dayId === dayId && !v.voidedAt)
-    .flatMap((v) => v.items)
-    .filter((i) => i.flavorId === flavorId)
-    .reduce((a, i) => a + i.qty, 0);
+  const quantity = (entries) => entries.flatMap((entry) => entry.items)
+    .filter((i) => i.flavorId === flavorId).reduce((a, i) => a + i.qty, 0);
+  const sales = s.sales.filter((v) => v.dayId === dayId);
+  const fromHeldStock = new Set(s.reservations.filter(usesHeldStock).map((r) => r.id));
+  const sold = quantity(sales.filter((v) => !v.voidedAt));
+  const fulfilledFromHeld = quantity(sales.filter((v) => !v.voidedAt && fromHeldStock.has(v.reservationId)));
+  // Once a day closes, its held units stay outside its reconciled balance.
+  // A later cancellation or void puts them into the open day's available stock.
+  const returned = quantity(s.reservations.filter((r) =>
+    r.status === "cancelled" && r.finishedDayId === dayId && usesHeldStock(r),
+  )) + quantity(sales.filter((v) => v.voidedAt && fromHeldStock.has(v.reservationId)));
   const reserved = s.reservations
-    .filter((r) => r.dayId === dayId && r.status === "pending")
+    .filter((r) => r.dayId === dayId && (r.status === "pending" || usesHeldStock(r)))
     .flatMap((r) => r.items)
     .filter((i) => i.flavorId === flavorId)
     .reduce((a, i) => a + i.qty, 0);
@@ -71,9 +84,11 @@ export function stock(s, dayId, flavorId) {
     carried,
     losses,
     adjustments,
+    returned,
     sold,
+    fulfilledFromHeld,
     reserved,
-    available: received + carried + adjustments - losses - sold - reserved,
+    available: received + carried + adjustments + returned - losses - (sold - fulfilledFromHeld) - reserved,
   };
 }
 export const total = (items) => items.reduce((a, i) => a + i.qty * i.price, 0);
@@ -81,17 +96,17 @@ export function financial(s, dayId) {
   const sales = s.sales.filter(
     (v) => (!dayId || v.dayId === dayId) && !v.voidedAt,
   );
-  const payments = s.payments.filter(
-    (p) =>
-      (!dayId || p.dayId === dayId) &&
-      !s.sales.find((v) => v.id === p.saleId)?.voidedAt,
+  const salesById = new Map(s.sales.map((v) => [v.id, v]));
+  const paymentsBySale = new Map(s.payments.filter((p) => p.saleId !== undefined).map((p) => [p.saleId, p]));
+  const payments = s.payments.filter((p) =>
+    (!dayId || p.dayId === dayId) && p.saleId !== undefined && !salesById.get(p.saleId)?.voidedAt,
   );
   const collected = s.payments.filter((p) => !dayId || p.dayId === dayId);
   // Legacy voids assumed a completed refund. Keep that interpretation explicit.
   const refunds = s.sales
     .filter((v) => v.voidedAt)
     .flatMap((v) => {
-      const p = s.payments.find((p) => p.saleId === v.id);
+      const p = paymentsBySale.get(v.id);
       return p && (v.refund?.status === "paid" || !v.refund)
         ? [
             {
@@ -101,8 +116,13 @@ export function financial(s, dayId) {
             },
           ]
         : [];
-    })
-    .filter((r) => !dayId || r.dayId === dayId);
+    });
+  const cancelled = s.reservations.filter((r) => r.refund);
+  for (const r of cancelled) {
+    if (r.refund.status === "paid")
+      refunds.push({ ...r.refund, amount: reservationPayment(s, r.id).amount });
+  }
+  const cashRefunds = refunds.filter((r) => !dayId || r.dayId === dayId);
   const sum = (xs) => xs.reduce((a, x) => a + x.amount, 0);
   return {
     gross: sales.reduce((a, v) => a + total(v.items), 0),
@@ -111,12 +131,7 @@ export function financial(s, dayId) {
       0,
     ),
     pending: sales.reduce(
-      (a, v) =>
-        a +
-        total(v.items) -
-        s.payments
-          .filter((p) => p.saleId === v.id)
-          .reduce((b, p) => b + p.amount, 0),
+      (a, v) => a + total(v.items) - (paymentsBySale.get(v.id)?.amount ?? 0),
       0,
     ),
     received: sum(payments),
@@ -124,20 +139,22 @@ export function financial(s, dayId) {
       METHODS.map((m) => [m, sum(payments.filter((p) => p.method === m))]),
     ),
     collected: sum(collected),
-    refunded: sum(refunds),
-    cashNet: sum(collected) - sum(refunds),
+    refunded: sum(cashRefunds),
+    cashNet: sum(collected) - sum(cashRefunds),
     cashMethods: Object.fromEntries(
       METHODS.map((m) => [
         m,
         sum(collected.filter((p) => p.method === m)) -
-          sum(refunds.filter((p) => p.method === m)),
+          sum(cashRefunds.filter((p) => p.method === m)),
       ]),
     ),
     refundPending: s.sales
       .filter(
         (v) => v.refund?.status === "pending" && (!dayId || v.dayId === dayId),
       )
-      .reduce((a, v) => a + total(v.items), 0),
+      .reduce((a, v) => a + total(v.items), 0) + cancelled
+        .filter((r) => r.refund.status === "pending" && (!dayId || (r.finishedDayId ?? r.dayId) === dayId))
+        .reduce((a, r) => a + total(r.items), 0),
     voided: s.sales
       .filter((v) => v.voidedAt && (!dayId || v.dayId === dayId))
       .reduce((a, v) => a + total(v.items), 0),
@@ -172,16 +189,20 @@ export function apply(state, cmd) {
     if (!d) fail("Abra um dia de vendas primeiro.");
     return d;
   };
-  const pay = (v, method) => {
-    if (!METHODS.includes(method)) fail("Forma de pagamento inválida.");
+  const pay = (items, links, receivedAt = at) => {
+    if (!METHODS.includes(cmd.method)) fail("Forma de pagamento inválida.");
     s.payments.push({
       id: cmd.id + "p",
-      saleId: v.id,
+      ...links,
       dayId: needDay().id,
-      method,
-      amount: total(v.items),
-      at,
+      method: cmd.method,
+      amount: total(items),
+      at: receivedAt,
     });
+  };
+  const checkRevision = (r) => {
+    if (cmd.expectedRevision !== undefined && cmd.expectedRevision !== (r.revision ?? 0))
+      fail("Esta reserva mudou. Feche o formulário e confira novamente.");
   };
   switch (cmd.type) {
     case "flavor": {
@@ -266,16 +287,13 @@ export function apply(state, cmd) {
     }
     case "reserve": {
       needDay();
-      if (
-        !String(cmd.customer || "").trim() ||
-        !String(cmd.location || "").trim()
-      )
-        fail("Informe cliente e retirada.");
+      if (!String(cmd.customer || "").trim()) fail("Informe o cliente.");
+      if (!PICKUP_LOCATIONS.includes(cmd.location)) fail("Selecione o local de retirada.");
       s.reservations.push({
         id: cmd.id,
         dayId: d.id,
         customer: cmd.customer.trim(),
-        location: cmd.location.trim(),
+        location: cmd.location,
         items: itemsFor(s, cmd.items, d.id),
         status: "pending",
         at,
@@ -283,34 +301,36 @@ export function apply(state, cmd) {
       break;
     }
     case "edit-reservation": {
-      needDay();
       const r = s.reservations.find((r) => r.id === cmd.reservationId);
-      if (!r || r.status !== "pending" || r.dayId !== d.id)
-        fail("Só é possível editar reservas pendentes do dia aberto.");
+      const paid = r && reservationPayment(s, r.id);
+      if (!r || r.status !== "pending" || (!paid && r.dayId !== needDay().id))
+        fail("Só é possível editar reservas pendentes.");
       if (cmd.expectedRevision !== (r.revision || 0))
         fail(
           "Esta reserva mudou em outra aba. Feche e abra a edição novamente.",
         );
-      if (
-        !String(cmd.customer || "").trim() ||
-        !String(cmd.location || "").trim()
-      )
-        fail("Informe cliente e retirada.");
+      if (!String(cmd.customer || "").trim()) fail("Informe o cliente.");
+      const location = cmd.location ?? r.location;
+      if (location !== r.location && !PICKUP_LOCATIONS.includes(location))
+        fail("Selecione o local de retirada.");
       const before = structuredClone(r);
-      // Release only this reservation inside the cloned transaction state.
-      r.status = "editing";
-      const priceState = structuredClone(s);
-      for (const old of before.items) {
-        const f = priceState.flavors.find((f) => f.id === old.flavorId);
-        f.active = true;
-        f.price = old.price;
+      if (paid) {
+        if (cmd.items !== undefined) fail("Os itens da reserva paga já estão confirmados.");
+      } else {
+        // Release only this reservation inside the cloned transaction state.
+        r.status = "editing";
+        const priceState = structuredClone(s);
+        for (const old of before.items) {
+          const f = priceState.flavors.find((f) => f.id === old.flavorId);
+          f.active = true;
+          f.price = old.price;
+        }
+        r.items = itemsFor(priceState, cmd.items, d.id);
+        r.status = "pending";
       }
-      const next = itemsFor(priceState, cmd.items, d.id);
       Object.assign(r, {
-        items: next,
         customer: cmd.customer.trim(),
-        location: cmd.location.trim(),
-        status: "pending",
+        location,
         revision: (r.revision || 0) + 1,
         updatedAt: at,
       });
@@ -318,7 +338,7 @@ export function apply(state, cmd) {
         id: cmd.id + "edit",
         kind: "audit",
         action: "reservation-edited",
-        dayId: d.id,
+        dayId: d?.id ?? r.dayId,
         at,
         before,
         after: structuredClone(r),
@@ -335,17 +355,33 @@ export function apply(state, cmd) {
         at,
       };
       s.sales.push(v);
-      if (cmd.method !== "Pendente") pay(v, cmd.method);
+      if (cmd.method !== "Pendente") pay(v.items, { saleId: v.id });
+      break;
+    }
+    case "reservation-payment": {
+      needDay();
+      const r = s.reservations.find((r) => r.id === cmd.reservationId);
+      if (!r || r.status !== "pending" || r.dayId !== d.id || reservationPayment(s, r.id))
+        fail("Reserva já paga, processada ou fora do dia aberto.");
+      checkRevision(r);
+      const receivedAt = cmd.receivedAt ?? at;
+      if (!date(receivedAt) || Date.parse(receivedAt) > Date.parse(at))
+        fail("Informe uma data de recebimento válida, até o horário atual.");
+      pay(r.items, { reservationId: r.id }, receivedAt);
+      r.revision = (r.revision ?? 0) + 1;
       break;
     }
     case "complete":
     case "cancel": {
       needDay();
       const r = s.reservations.find((r) => r.id === cmd.reservationId);
-      if (!r || r.status !== "pending" || r.dayId !== d.id)
+      const paid = r && reservationPayment(s, r.id);
+      if (!r || r.status !== "pending" || (!paid && r.dayId !== d.id))
         fail("Reserva já processada ou inválida.");
+      checkRevision(r);
       r.status = cmd.type === "cancel" ? "cancelled" : "completed";
       r.finishedAt = at;
+      if (r.dayId !== d.id) r.finishedDayId = d.id;
       if (cmd.type === "complete") {
         const v = {
           id: cmd.id,
@@ -356,7 +392,10 @@ export function apply(state, cmd) {
           at,
         };
         s.sales.push(v);
-        if (cmd.method !== "Pendente") pay(v, cmd.method);
+        if (paid) paid.saleId = v.id;
+        else if (cmd.method !== "Pendente") pay(v.items, { saleId: v.id });
+      } else if (paid) {
+        r.refund = { status: "pending" };
       }
       break;
     }
@@ -365,7 +404,7 @@ export function apply(state, cmd) {
       const v = s.sales.find((v) => v.id === cmd.saleId && !v.voidedAt);
       if (!v || s.payments.some((p) => p.saleId === v.id))
         fail("Venda já recebida ou inválida.");
-      pay(v, cmd.method);
+      pay(v.items, { saleId: v.id });
       break;
     }
     case "void": {
@@ -384,21 +423,22 @@ export function apply(state, cmd) {
     }
     case "refund": {
       needDay();
-      const v = s.sales.find(
-        (v) =>
-          v.id === cmd.saleId && v.voidedAt && v.refund?.status === "pending",
-      );
-      if (!v) fail("Reembolso já registrado ou inválido.");
+      const entry = cmd.reservationId !== undefined
+        ? s.reservations.find((r) => r.id === cmd.reservationId && r.status === "cancelled")
+        : s.sales.find((v) => v.id === cmd.saleId && v.voidedAt);
+      if (entry?.refund?.status !== "pending") fail("Reembolso já registrado ou inválido.");
       if (!METHODS.includes(cmd.method)) fail("Forma de reembolso inválida.");
-      v.refund = { status: "paid", method: cmd.method, dayId: d.id, at };
+      entry.refund = { status: "paid", method: cmd.method, dayId: d.id, at };
       break;
     }
     case "close": {
       needDay();
       if (
-        s.reservations.some((r) => r.dayId === d.id && r.status === "pending")
+        s.reservations.some((r) =>
+          r.dayId === d.id && r.status === "pending" && !reservationPayment(s, r.id),
+        )
       )
-        fail("Conclua ou cancele as reservas pendentes.");
+        fail("Conclua ou cancele as reservas pendentes sem pagamento.");
       const selected = cmd.carryover ?? {};
       const carryover = [];
       for (const f of s.flavors) {
@@ -464,9 +504,9 @@ export function validate(s) {
     fail("Operações inválidas.");
   if (s.days.filter((d) => !d.closedAt).length > 1)
     fail("Mais de um dia aberto.");
-  const day = (id) => s.days.some((d) => d.id === id),
+  const dayOrder = new Map(s.days.map((d, index) => [d.id, index]));
+  const day = (id) => dayOrder.has(id),
     flavor = (id) => s.flavors.some((f) => f.id === id);
-  const date = (v) => typeof v === "string" && Number.isFinite(Date.parse(v));
   for (const f of s.flavors)
     if (
       typeof f.name !== "string" ||
@@ -514,13 +554,22 @@ export function validate(s) {
       (r.status !== "completed" && matches.length)
     )
       fail("Reserva inconsistente.");
+    const paid = reservationPayment(s, r.id);
+    if (paid && r.status !== "pending" && !date(r.finishedAt))
+      fail("Data de conclusão da reserva inválida.");
+    if (r.finishedDayId !== undefined &&
+        (!paid || r.status === "pending" ||
+          !day(r.finishedDayId) || dayOrder.get(r.finishedDayId) <= dayOrder.get(r.dayId)))
+      fail("Dia de retirada ou cancelamento inválido.");
+    if (Boolean(r.refund) !== (r.status === "cancelled" && Boolean(paid)))
+      fail("Reembolso de reserva inconsistente.");
   }
   for (const v of s.sales) {
     if (v.reservationId) {
       const r = s.reservations.find((r) => r.id === v.reservationId);
       if (
         !r ||
-        r.dayId !== v.dayId ||
+        (r.finishedDayId ?? r.dayId) !== v.dayId ||
         JSON.stringify(r.items) !== JSON.stringify(v.items)
       )
         fail("Venda de reserva inconsistente.");
@@ -529,31 +578,33 @@ export function validate(s) {
   }
   for (const p of s.payments) {
     const v = s.sales.find((v) => v.id === p.saleId);
+    const r = s.reservations.find((r) => r.id === p.reservationId);
+    const entry = r ?? v;
     if (
-      !v ||
+      !entry ||
+      (p.reservationId !== undefined && (!r || p.dayId !== r.dayId)) ||
+      (p.saleId !== undefined && !v) ||
+      (r?.status === "completed" && v?.reservationId !== r.id) ||
+      (r && r.status !== "completed" && p.saleId !== undefined) ||
+      (r && v?.voidedAt && !v.refund) ||
       !date(p.at) ||
       !day(p.dayId) ||
       !METHODS.includes(p.method) ||
-      p.amount !== total(v.items)
+      p.amount !== total(entry.items)
     )
       fail("Pagamento inválido.");
   }
-  for (const v of s.sales)
-    if (v.refund) {
-      if (
-        !v.voidedAt ||
-        !s.payments.some((p) => p.saleId === v.id) ||
-        !["pending", "paid"].includes(v.refund.status)
-      )
-        fail("Reembolso inválido.");
-      if (
-        v.refund.status === "paid" &&
-        (!date(v.refund.at) ||
-          !day(v.refund.dayId) ||
-          !METHODS.includes(v.refund.method))
-      )
-        fail("Reembolso inválido.");
-    }
+  for (const v of s.sales) {
+    if (v.refund && (!v.voidedAt || !s.payments.some((p) => p.saleId === v.id)))
+      fail("Reembolso inválido.");
+  }
+  for (const { refund } of [...s.sales, ...s.reservations]) {
+    if (!refund) continue;
+    if (!["pending", "paid"].includes(refund.status) ||
+        (refund.status === "paid" &&
+          (!date(refund.at) || !day(refund.dayId) || !METHODS.includes(refund.method))))
+      fail("Reembolso inválido.");
+  }
   for (const r of s.reservations)
     if (r.revision !== undefined && !integer(r.revision))
       fail("Revisão de reserva inválida.");
@@ -564,7 +615,10 @@ export function validate(s) {
         !date(d.businessDate + "T12:00:00"))
     )
       fail("Data comercial inválida.");
-  if (!unique(s.payments.map((p) => p.saleId))) fail("Pagamento duplicado.");
+  for (const key of ["saleId", "reservationId"]) {
+    if (!unique(s.payments.filter((p) => p[key] !== undefined).map((p) => p[key])))
+      fail("Pagamento duplicado.");
+  }
   for (const e of s.events) {
     if (!date(e.at)) fail("Data de evento inválida.");
     if (e.kind === "audit") continue;
@@ -597,7 +651,9 @@ export function validate(s) {
   for (const d of s.days) {
     if (
       d.closedAt &&
-      s.reservations.some((r) => r.dayId === d.id && r.status === "pending")
+      s.reservations.some((r) =>
+        r.dayId === d.id && r.status === "pending" && !reservationPayment(s, r.id),
+      )
     )
       fail("Dia fechado com reservas.");
     for (const f of s.flavors) {

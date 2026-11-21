@@ -256,27 +256,6 @@ p {
   padding: 18px;
 }
 
-.cookie {
-  width: 40px;
-  height: 40px;
-  background: #eedcc2;
-  color: #84572e;
-  display: grid;
-  place-items: center;
-  border-radius: 13px;
-  font-size: 25px;
-}
-
-.card:nth-child(3n) .cookie {
-  background: #f2d7ce;
-  color: #963c36;
-}
-
-.card:nth-child(4n) .cookie {
-  background: #e3d9cd;
-  color: #44302c;
-}
-
 .price {
   font-size: 13px;
   color: var(--muted);
@@ -566,12 +545,6 @@ textarea {
     line-height: 1.35;
   }
 
-  .cookie {
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-  }
-
   .pill {
     font-size: 10px;
     padding: 7px 9px;
@@ -700,8 +673,11 @@ textarea {
   line-height: 1.25;
 }
 
-.cookie {
+.stock-icon {
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
+  object-fit: contain;
 }
 
 .stock-available {
@@ -769,6 +745,13 @@ textarea {
 
 .reservations-list {
   margin-top: 18px;
+}
+
+.reservation-paid {
+  margin: 8px 0 0;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .stock-form-row {
@@ -847,6 +830,13 @@ textarea {
   font-size: 12px;
   color: var(--muted);
   font-weight: 650;
+}
+
+.summary-tile dt small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .summary-tile dd {
@@ -1221,12 +1211,6 @@ dialog[open]:has(.sale-form) {
 
   .stock-top {
     gap: 5px;
-  }
-
-  .stock-top .cookie {
-    width: 24px;
-    height: 24px;
-    font-size: 18px;
   }
 
   .hero {

@@ -10,6 +10,7 @@ import {
   localDate,
   businessDate,
   nextOpening,
+  reservationPayment,
 } from "./domain.js";
 import { read, mutate } from "./db.js";
 const $ = (s) => document.querySelector(s),
@@ -65,7 +66,7 @@ dialog.addEventListener("cancel", (e) => {
 function form(content, label = "Salvar") {
   return `<form>${content}<p class="error" role="alert"></p><button class="primary" type="submit">${label}</button></form>`;
 }
-function bindForm(make) {
+function bindForm(make, successMessage = "Salvo com sucesso.") {
   const f = $("#dialog-body form"),
     id = crypto.randomUUID(),
     expectedDayId = opened(state)?.id ?? null;
@@ -88,7 +89,7 @@ function bindForm(make) {
       const target = (dialogTrigger?.id && document.getElementById(dialogTrigger.id)) ||
         (disclosure && document.querySelector(`[data-disclosure="${CSS.escape(disclosure)}"] > summary`));
       (target || $("#app")).focus({ preventScroll: true });
-      toast("Salvo com sucesso.");
+      toast(successMessage);
     } catch (err) {
       f.querySelector(".error").textContent = err.message;
     } finally {
@@ -153,14 +154,27 @@ function move() {
 }
 function payment(type,id){return ui.payment(type,id);}
 function cancel(id) {
+  const r = state.reservations.find((entry) => entry.id === id);
+  if (!r) return;
+  if (!opened(state)) {
+    modal("Abra um dia de vendas",
+      `<p>Depois de abrir, volte a Reservas para cancelar e liberar os cookies no estoque disponível.</p>
+       <button class="primary wide" id="open-for-cancel">Abrir dia de vendas</button>`);
+    $("#open-for-cancel").onclick = openDay;
+    return;
+  }
+  const paid = reservationPayment(state, id);
   modal(
     "Cancelar reserva",
     form(
-      "<p>Os cookies reservados voltarão a ficar disponíveis.</p>",
+      `<p>Os cookies reservados voltarão a ficar disponíveis.</p>
+       ${paid ? `<p class="note">O recebimento de ${money(paid.amount)} permanece no Histórico.
+         Depois de devolver ao cliente, use <strong>Histórico → Reembolsos pendentes</strong>.</p>` : ""}`,
       "Cancelar reserva",
     ),
   );
-  bindForm(() => ({ type: "cancel", reservationId: id }));
+  bindForm(() => ({ type: "cancel", reservationId: id, expectedRevision: r.revision ?? 0 }),
+    paid ? "Reserva cancelada. Reembolso pendente no Histórico." : "Reserva cancelada.");
 }
 function voidSale(id) {
   const sale = state.sales.find((v) => v.id === id);
@@ -179,10 +193,11 @@ function voidSale(id) {
 }
 function closeDay() {
   const day = opened(state);
-  const pending = state.reservations.filter((r) => r.dayId === day.id && r.status === "pending");
-  if (pending.length) {
-    modal("Resolva as reservas", `<p class="note">Há ${pending.length} ${pending.length === 1 ? "reserva pendente" : "reservas pendentes"}.
-      Em Reservas, conclua as retiradas feitas ou cancele as que ficaram em aberto. Depois, volte para fechar o dia.</p>
+  const pending = state.reservations.filter((r) => r.status === "pending");
+  const unpaid = pending.filter((r) => r.dayId === day.id && !reservationPayment(state, r.id));
+  if (unpaid.length) {
+    modal("Resolva as reservas", `<p class="note">Há ${unpaid.length} ${unpaid.length === 1 ? "reserva sem pagamento" : "reservas sem pagamento"}.
+      Em Reservas, registre os pagamentos recebidos, conclua as retiradas feitas ou cancele as reservas. Depois, volte para fechar o dia.</p>
       <button class="primary wide" id="go-reservations">Ir para Reservas</button>`);
     $("#go-reservations").onclick = () => {
       dialog.close();
@@ -208,6 +223,7 @@ function closeDay() {
   }).join("");
   modal("Conferir e fechar", form(
     `<p class="note">Confira a contagem física. Em <strong>Reaproveitar</strong>, confirme quantas unidades entram na próxima abertura. As demais ficam só no saldo deste dia. Lance perdas e divergências em <strong>Movimentar estoque</strong> antes de fechar.</p>
+    ${pending.length ? '<p class="note">Guarde os cookies das reservas pagas à parte. Conte apenas os cookies disponíveis e mantenha as reservas abertas até a retirada.</p>' : ""}
     <button type="button" id="move-before-close">Movimentar estoque</button>
     <div class="form-items">${rows}</div>`, "Confirmar fechamento",
   ));
@@ -298,16 +314,41 @@ function dayWarning(d) {
       As operações ficam nesse dia até você fechar e abrir outro.</p>`
     : "";
 }
+const stockIconsById = new Map([
+  ["f0", "nutella"], ["f1", "tradicional"], ["f2", "red"], ["f3", "red"],
+  ["f4", "black"], ["f5", "black"], ["6837b8cf-64a6-4e78-8cd1-649d3ba7fce5", "tradicional"],
+]);
+const stockIconsByName = new Map([
+  ["black bueno", "black"], ["laka com oreo", "tradicional"], ["ninho com nutella", "tradicional"],
+  ["nutella", "nutella"], ["oreo", "black"], ["oreo com nutella", "black"],
+  ["red ninho", "red"], ["red nutella", "red"],
+]);
+function stockIcon(flavor) {
+  const icon = stockIconsById.get(flavor.id) ?? stockIconsByName.get(flavor.name.trim().toLowerCase());
+  return icon ? `<img class="stock-icon" src="./icons/cookies-${icon}.png" width="24" height="24" alt="">` : "";
+}
 function stockCard(flavor, q) {
   const status = q.available ? "disponíveis" : q.reserved ? "Sem unidades livres" : "Esgotado";
   return `<article class="card stock-card">
-    <div class="stock-top"><span class="cookie" aria-hidden="true">⠿</span>
+    <div class="stock-top">${stockIcon(flavor)}
       <div><h3>${esc(flavor.name)}${flavor.active ? "" : " (inativo)"}</h3><div class="price">${money(flavor.price)}</div></div>
     </div>
     <div class="stock-available ${q.available ? "" : "stock-zero"}"><strong>${q.available}</strong><span>${status}</span></div>
     <dl class="stock-info"><div class="${!q.available && q.reserved ? "reserved-highlight" : ""}">
       <dt>Reservados</dt><dd>${q.reserved}</dd></div><div><dt>Vendidos</dt><dd>${q.sold}</dd></div></dl>
   </article>`;
+}
+function reservationCard(r) {
+  const paid = reservationPayment(state, r.id);
+  const id = esc(r.id);
+  return `<article class="card"><div class="row"><h3>${esc(r.customer)}</h3><span class="tag">${esc(r.location)}</span></div>
+    <p class="receipt">${r.items.map((i) => `${i.qty}× ${esc(i.name)}`).join("<br>")}</p>
+    <strong>${money(total(r.items))}</strong>
+    ${paid ? `<p class="reservation-paid">Pago · Aguardando retirada</p>` : ""}
+    <div class="actions"><button class="primary" data-complete="${id}">Concluir retirada</button>
+      ${paid ? "" : `<button data-reservation-payment="${id}">Registrar pagamento</button>`}
+      <button data-edit-reservation="${id}">Editar</button><button data-cancel="${id}">Cancelar</button>
+    </div></article>`;
 }
 const disclosures = new Map();
 function rememberDisclosures() {
@@ -367,10 +408,7 @@ function render() {
     const rs = state.reservations.filter((r) => r.status === "pending");
     app.innerHTML = `<div class="heading"><h1>Reservas</h1><span class="pill">${rs.length} pendentes</span></div>
       <button class="primary wide" id="reserve">＋ Nova reserva</button><div class="stack reservations-list">${rs.length
-        ? rs.map((r) => `<article class="card"><div class="row"><h3>${esc(r.customer)}</h3><span class="tag">${esc(r.location)}</span></div>
-          <p class="receipt">${r.items.map((i) => `${i.qty}× ${esc(i.name)}`).join("<br>")}</p><strong>${money(total(r.items))}</strong>
-          <div class="actions"><button data-edit-reservation="${esc(r.id)}">Editar</button><button data-cancel="${esc(r.id)}">Cancelar</button>
-            <button class="primary" data-complete="${esc(r.id)}">Concluir retirada</button></div></article>`).join("")
+        ? rs.map(reservationCard).join("")
         : '<p class="empty">Nenhuma reserva pendente.</p>'}</div>`;
     $("#reserve").onclick = () => sale(true);
   } else if (tab === "historico") {
@@ -424,6 +462,8 @@ $("#app").addEventListener("click", (e) => {
   const actions = {
     editReservation: (id) => sale(true, id), cancel, complete: (id) => payment("complete", id),
     payment: (id) => payment("payment", id), void: voidSale, refund: (id) => payment("refund", id),
+    reservationPayment: (id) => payment("reservation-payment", id),
+    reservationRefund: (id) => payment("reservation-refund", id),
   };
   const action = Object.keys(actions).find((name) => Object.hasOwn(button.dataset, name));
   if (action) actions[action](button.dataset[action]);

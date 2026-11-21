@@ -5,7 +5,7 @@ import {isPrivateData} from '../scripts/check-data.mjs';
 let seq=0;
 const run=(s,type,data={})=>apply(s,{id:`revision-${++seq}`,type,...data});
 const setup=()=>run(initial(),'open',{items:[{flavorId:'f0',qty:5},{flavorId:'f1',qty:3}]});
-const reserved=()=>run(setup(),'reserve',{customer:'Ana',location:'Central',items:[{flavorId:'f0',qty:2}]});
+const reserved=()=>run(setup(),'reserve',{customer:'Ana',location:'Bloco I Central',items:[{flavorId:'f0',qty:2}]});
 const edit=(s,items,extra={})=>run(s,'edit-reservation',{reservationId:s.reservations[0].id,expectedRevision:s.reservations[0].revision||0,customer:'Bia',location:'Bloco K',items,...extra});
 test('editar reserva libera os itens próprios, troca sabores e mantém auditoria',()=>{
  const before=reserved(),s=edit(before,[{flavorId:'f0',qty:4},{flavorId:'f1',qty:2}]),r=s.reservations[0];
@@ -15,9 +15,9 @@ test('editar reserva libera os itens próprios, troca sabores e mantém auditori
  const swapped=edit(s,[{flavorId:'f1',qty:3}]);assert.equal(stock(swapped,r.dayId,'f0').available,5);assert.equal(stock(swapped,r.dayId,'f1').available,0);
 });
 test('editar acima do estoque não altera reserva nem disponibilidade',()=>{const s=reserved(),copy=structuredClone(s);assert.throws(()=>edit(s,[{flavorId:'f0',qty:1},{flavorId:'f1',qty:4}]),/Estoque insuficiente/);assert.deepEqual(s,copy);});
-test('edição não consome unidades de outra reserva e não aceita revisão antiga',()=>{let s=reserved();s=run(s,'reserve',{customer:'Outra',location:'C',items:[{flavorId:'f0',qty:3}]});assert.throws(()=>edit(s,[{flavorId:'f0',qty:3}]));s=edit(s,[{flavorId:'f0',qty:1}]);assert.throws(()=>edit(s,[{flavorId:'f0',qty:2}],{expectedRevision:0}),/outra aba/);});
+test('edição não consome unidades de outra reserva e não aceita revisão antiga',()=>{let s=reserved();s=run(s,'reserve',{customer:'Outra',location:'Bloco C',items:[{flavorId:'f0',qty:3}]});assert.throws(()=>edit(s,[{flavorId:'f0',qty:3}]));s=edit(s,[{flavorId:'f0',qty:1}]);assert.throws(()=>edit(s,[{flavorId:'f0',qty:2}],{expectedRevision:0}),/outra aba/);});
 test('preço original em sabores mantidos, preço atual em sabores adicionados',()=>{let s=reserved();s=run(s,'flavor',{flavorId:'f0',name:'Nutella',price:1500});s=run(s,'flavor',{flavorId:'f1',name:'Ninho',price:1600});s=edit(s,[{flavorId:'f0',qty:3},{flavorId:'f1',qty:1}]);assert.deepEqual(s.reservations[0].items.map(i=>i.price),[1200,1600]);s=run(s,'complete',{reservationId:s.reservations[0].id,method:'Pix'});assert.equal(financial(s).gross,5200);assert.throws(()=>edit(s,[{flavorId:'f0',qty:1}]),/pendentes/);});
-test('edição duplicada é idempotente e cancelamento libera quantidades editadas',()=>{const s=reserved(),cmd={id:'same-edit',type:'edit-reservation',reservationId:s.reservations[0].id,expectedRevision:0,customer:'Ana',location:'Pátio',items:[{flavorId:'f1',qty:3}]};const updated=apply(apply(s,cmd),cmd);assert.equal(updated.reservations[0].revision,1);const cancelled=run(updated,'cancel',{reservationId:cmd.reservationId});assert.equal(stock(cancelled,s.days[0].id,'f1').available,3);assert.throws(()=>edit(cancelled,[{flavorId:'f0',qty:1}]));});
+test('edição duplicada é idempotente e cancelamento libera quantidades editadas',()=>{const s=reserved(),cmd={id:'same-edit',type:'edit-reservation',reservationId:s.reservations[0].id,expectedRevision:0,customer:'Ana',location:'Pátio/Cantina',items:[{flavorId:'f1',qty:3}]};const updated=apply(apply(s,cmd),cmd);assert.equal(updated.reservations[0].revision,1);const cancelled=run(updated,'cancel',{reservationId:cmd.reservationId});assert.equal(stock(cancelled,s.days[0].id,'f1').available,3);assert.throws(()=>edit(cancelled,[{flavorId:'f0',qty:1}]));});
 test('data comercial usa fuso local; meia-noite mantém dia aberto original',()=>{
  const previous=process.env.TZ;process.env.TZ='America/Sao_Paulo';try{
   const at='2026-11-16T01:30:00.000Z';assert.equal(localDate(at),'2026-11-15');

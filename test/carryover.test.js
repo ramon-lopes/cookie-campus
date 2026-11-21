@@ -46,7 +46,7 @@ test("somente a seleção confirmada passa à próxima venda após um intervalo"
 
 test("reserva ocupa o estoque livre, bloqueia novas operações e pode ser concluída", () => {
   let s = apply(initial(), first);
-  const request = { id: "reserva", type: "reserve", customer: "Cliente teste", location: "Cantina", items: nutella(5) };
+  const request = { id: "reserva", type: "reserve", customer: "Cliente teste", location: "Pátio/Cantina", items: nutella(5) };
   s = apply(s, request);
   assert.equal(stock(s, first.id, "f0").available, 0);
   assert.throws(() => apply(s, { id: "venda", type: "sale", items: nutella(1), method: "Pix" }), /Estoque insuficiente/);
