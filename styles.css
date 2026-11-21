@@ -1142,6 +1142,12 @@ dialog[open]:has(.sale-form) {
   font-size: 23px;
 }
 
+.sale-footer .confirmation {
+  min-height: 44px;
+  align-items: center;
+  margin: 4px 0;
+}
+
 .sale-footer [type="submit"] {
   min-height: 50px;
 }

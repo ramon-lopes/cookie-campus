@@ -1,5 +1,5 @@
 import { opened, stock, total, METHODS, PICKUP_LOCATIONS, localDate, businessDate, parseBackup,
-  financial, reservationPayment } from "./domain.js";
+  financial, reservationPayment, SalePriceChangedError } from "./domain.js";
 import { read, restore, recoveryCopies } from "./db.js";
 import { displayDate } from "./history-ui.js";
 
@@ -26,7 +26,7 @@ export function createOperationsUI(ctx) {
       return;
     }
     const controls = entries.map(({ flavor, qty, max, price }, index) =>
-      `<div class="picker-row"><div><strong>${esc(flavor.name)}</strong><small>${money(price)} · até ${max} un.</small></div>
+      `<div class="picker-row"><div><strong>${esc(flavor.name)}</strong><small><span data-price="${index}">${money(price)}</span> · até ${max} un.</small></div>
         <div class="stepper">
           <button type="button" data-step="-1" data-pick="${index}" aria-label="Diminuir ${esc(flavor.name)}" ${qty ? "" : "disabled"}>−</button>
           <input readonly tabindex="-1" aria-label="Quantidade de ${esc(flavor.name)}" name="qty_${index}" value="${qty}" inputmode="none">
@@ -52,10 +52,12 @@ export function createOperationsUI(ctx) {
       <div class="sale-footer">${reserve ? "" : `<label class="sale-method">Pagamento<select name="method" aria-label="Pagamento">${options(true)}</select></label>`}
         <div class="total"><span>Total</span><strong id="sale-total" aria-live="polite">${money(0)}</strong></div>
         <p class="error" role="alert"></p>
+        ${reserve ? "" : '<label class="confirmation" hidden><input type="checkbox" name="confirmPrices" required disabled>Conferi os novos preços.</label>'}
         <button class="primary wide" type="submit">${reservation ? "Salvar alterações" : reserve ? "Confirmar reserva" : "Confirmar venda"}</button>
       </div></form>`);
 
     const form = $("#dialog-body form");
+    const priceConfirmation = form.elements.namedItem("confirmPrices");
     const selected = (fd) => entries.flatMap(({ flavor, price }, index) => {
       const qty = Number(fd.get("qty_" + index));
       return qty ? [{ flavorId: flavor.id, qty, price }] : [];
@@ -63,10 +65,13 @@ export function createOperationsUI(ctx) {
     function update() {
       const items = selected(new FormData(form));
       $("#sale-total").textContent = money(paid ? paid.amount : total(items));
-      form.querySelector("[type=submit]").disabled = !paid && !items.length;
+      const waitingForConfirmation = priceConfirmation && !priceConfirmation.disabled && !priceConfirmation.checked;
+      form.querySelector("[type=submit]").disabled = ctx.getBusy() || (!paid && !items.length) || Boolean(waitingForConfirmation);
     }
+    priceConfirmation?.addEventListener("change", update);
     form.querySelectorAll("[data-pick]").forEach((button) => {
       button.onclick = () => {
+        if (ctx.getBusy()) return;
         const index = Number(button.dataset.pick), max = entries[index].max;
         const input = form.elements.namedItem("qty_" + index);
         const qty = Math.max(0, Math.min(max, Number(input.value) + Number(button.dataset.step)));
@@ -83,13 +88,30 @@ export function createOperationsUI(ctx) {
         update();
       };
     });
-    bindForm((fd) => ({
-      type: reservation ? "edit-reservation" : reserve ? "reserve" : "sale",
-      reservationId: reservation?.id, expectedRevision: reservation?.revision ?? 0,
-      items: paid ? undefined : selected(fd), customer: fd.get("customer"),
-      location: fd.get("location") === "legacy" ? location : fd.get("location") ?? location,
-      method: fd.get("method"),
-    }));
+    bindForm((fd) => {
+      const items = paid ? undefined : selected(fd);
+      return {
+        type: reservation ? "edit-reservation" : reserve ? "reserve" : "sale",
+        reservationId: reservation?.id, expectedRevision: reservation?.revision ?? 0,
+        items, customer: fd.get("customer"),
+        location: fd.get("location") === "legacy" ? location : fd.get("location") ?? location,
+        method: fd.get("method"),
+        expectedPrices: reserve ? undefined : Object.fromEntries(items.map(({ flavorId, price }) => [flavorId, price])),
+      };
+    }, undefined, (error) => {
+      if (!(error instanceof SalePriceChangedError)) return;
+      const prices = new Map(error.items.map(({ flavorId, price }) => [flavorId, price]));
+      for (const [index, entry] of entries.entries()) {
+        const price = prices.get(entry.flavor.id);
+        if (price === undefined) continue;
+        entry.price = price;
+        form.querySelector(`[data-price="${index}"]`).textContent = money(price);
+      }
+      priceConfirmation.checked = false;
+      priceConfirmation.disabled = false;
+      priceConfirmation.closest("label").hidden = false;
+      update();
+    });
     update();
   }
 

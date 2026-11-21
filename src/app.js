@@ -66,7 +66,7 @@ dialog.addEventListener("cancel", (e) => {
 function form(content, label = "Salvar") {
   return `<form>${content}<p class="error" role="alert"></p><button class="primary" type="submit">${label}</button></form>`;
 }
-function bindForm(make, successMessage = "Salvo com sucesso.") {
+function bindForm(make, successMessage = "Salvo com sucesso.", onError) {
   const f = $("#dialog-body form"),
     id = crypto.randomUUID(),
     expectedDayId = opened(state)?.id ?? null;
@@ -91,10 +91,11 @@ function bindForm(make, successMessage = "Salvo com sucesso.") {
       (target || $("#app")).focus({ preventScroll: true });
       toast(successMessage);
     } catch (err) {
+      b.disabled = false;
       f.querySelector(".error").textContent = err.message;
+      onError?.(err);
     } finally {
       setBusy(false);
-      b.disabled = false;
     }
   };
 }
