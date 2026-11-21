@@ -176,6 +176,13 @@ function itemsFor(s, items, dayId) {
     return { flavorId, name: f.name, qty, price: f.price };
   });
 }
+export class SalePriceChangedError extends Error {
+  constructor(items) {
+    super("O preço mudou. Confira os novos valores antes de confirmar a venda.");
+    this.items = items;
+  }
+}
+
 export function apply(state, cmd) {
   if (!cmd.id || typeof cmd.id !== "string")
     fail("Operação sem identificador.");
@@ -347,10 +354,13 @@ export function apply(state, cmd) {
     }
     case "sale": {
       needDay();
+      const items = itemsFor(s, cmd.items, d.id);
+      if (cmd.expectedPrices && items.some((item) => cmd.expectedPrices[item.flavorId] !== item.price))
+        throw new SalePriceChangedError(items);
       const v = {
         id: cmd.id,
         dayId: d.id,
-        items: itemsFor(s, cmd.items, d.id),
+        items,
         customer: String(cmd.customer || "").trim(),
         at,
       };
