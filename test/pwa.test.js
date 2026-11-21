@@ -10,6 +10,7 @@ test('PWA: recursos locais, instalação e resposta offline do Service Worker',a
  vm.runInNewContext(code,context);
  let work;events.install({waitUntil:p=>work=p});await work;
  for(const asset of ['./index.html','./styles.css','./manifest.webmanifest','./src/app.js','./src/domain.js','./src/db.js','./src/operations-ui.js','./src/history-ui.js','./src/access.js'])assert.ok(cached.has(asset),asset);
+ for(const flavor of ['black','nutella','red','tradicional'])assert.ok(cached.has(`./icons/cookies-${flavor}.png`),flavor);
  events.activate({waitUntil:p=>work=p});await work;assert.deepEqual(removed,['cookie-campus:https://test.example/repo/:v2']);
  events.fetch({request:{method:'GET',url:'https://test.example/repo/src/app.js',mode:'cors'},respondWith:p=>work=p});assert.equal((await work).body,'./src/app.js');
  events.fetch({request:{method:'GET',url:'https://test.example/repo/unknown',mode:'navigate'},respondWith:p=>work=p});assert.equal((await work).body,'./index.html');

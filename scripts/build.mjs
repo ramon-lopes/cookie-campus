@@ -1,6 +1,7 @@
 import { mkdir, cp, readdir } from "node:fs/promises";
 import {checkRepositoryData} from './check-data.mjs';
-const files=['index.html','styles.css','src/app.js','src/domain.js','src/db.js','src/operations-ui.js','src/history-ui.js','src/access.js','icons/icon.svg','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png','manifest.webmanifest','sw.js'];
+const files=['index.html','styles.css','src/app.js','src/domain.js','src/db.js','src/operations-ui.js','src/history-ui.js','src/access.js','icons/icon.svg','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png',
+  'icons/cookies-black.png','icons/cookies-nutella.png','icons/cookies-red.png','icons/cookies-tradicional.png','manifest.webmanifest','sw.js'];
 await checkRepositoryData(files);
 await mkdir("dist", { recursive: true });
 // Do not silently delete unexpected files: stop before a possibly private file is published.

@@ -1,4 +1,5 @@
-import { opened, stock, total, METHODS, localDate, businessDate, parseBackup, financial } from "./domain.js";
+import { opened, stock, total, METHODS, PICKUP_LOCATIONS, localDate, businessDate, parseBackup,
+  financial, reservationPayment } from "./domain.js";
 import { read, restore, recoveryCopies } from "./db.js";
 import { displayDate } from "./history-ui.js";
 
@@ -10,16 +11,17 @@ export function createOperationsUI(ctx) {
 
   function sale(reserve = false, reservationId) {
     const state = ctx.getState(), day = opened(state);
-    if (!day) return openDay();
     const reservation = state.reservations.find((r) => r.id === reservationId);
-    const entries = state.flavors.flatMap((flavor) => {
+    const paid = reservation && reservationPayment(state, reservation.id);
+    if (!day && !paid) return openDay();
+    const entries = paid ? [] : state.flavors.flatMap((flavor) => {
       const old = reservation?.items.find((i) => i.flavorId === flavor.id);
       const available = stock(state, day.id, flavor.id).available;
       if (!old && (!flavor.active || !available)) return [];
       return [{ flavor, qty: old?.qty ?? 0, max: available + (old?.qty ?? 0), price: old?.price ?? flavor.price }];
     });
     const title = reservation ? "Editar reserva" : reserve ? "Nova reserva" : "Venda rápida";
-    if (!entries.length) {
+    if (!paid && !entries.length) {
       modal(title, '<p class="note">Sem unidades livres. Confira o estoque em Hoje ou conclua uma retirada na aba Reservas.</p>');
       return;
     }
@@ -31,13 +33,22 @@ export function createOperationsUI(ctx) {
           <button type="button" data-step="1" data-pick="${index}" aria-label="Adicionar ${esc(flavor.name)}" ${qty >= max ? "disabled" : ""}>+</button>
         </div></div>`).join("");
     const customer = `<label>Cliente<input name="customer" value="${esc(reservation?.customer ?? "")}" ${reserve ? "required" : ""} maxlength="100" autocomplete="name"></label>`;
+    const location = reservation?.location ?? "";
+    const legacyLocation = location && !PICKUP_LOCATIONS.includes(location);
+    const locationOptions = PICKUP_LOCATIONS.map((option) =>
+      `<option${option === location ? " selected" : ""}>${esc(option)}</option>`).join("");
     const customerFields = reserve
-      ? `${customer}<label>Retirada<input name="location" value="${esc(reservation?.location ?? "")}" required list="locations" maxlength="120" placeholder="Escolha ou digite um local"></label>
-        <datalist id="locations"><option>Central</option><option>Bloco K</option><option>Bloco C</option><option>Restaurante</option><option>Pátio</option></datalist>
-        ${reservation ? '<p class="muted">Sabores já reservados mantêm o preço original.</p>' : ""}`
+      ? `${customer}<label>Local de retirada<select name="location" ${!reservation || location ? "required" : ""}>
+          <option value="" disabled${location ? "" : " selected"}>Selecione o local</option>
+          ${legacyLocation ? `<option value="legacy" selected>${esc(location)} (local anterior)</option>` : ""}
+          ${locationOptions}</select></label>
+        ${paid ? '<p class="muted">Os sabores e as quantidades já foram pagos.</p>'
+          : reservation ? '<p class="muted">Sabores já reservados mantêm o preço original.</p>' : ""}`
       : `<details><summary>Adicionar nome do cliente</summary>${customer}</details>`;
     modal(title, `<form class="sale-form">
-      <div class="sale-scroll"><div class="picker-list">${controls}</div>${customerFields}</div>
+      <div class="sale-scroll">${paid ? `<p class="receipt">${reservation.items.map((i) =>
+        `${i.qty}× ${esc(i.name)}`).join("<br>")}</p>` : `<div class="picker-list">${controls}</div>`}
+        ${customerFields}</div>
       <div class="sale-footer">${reserve ? "" : `<label class="sale-method">Pagamento<select name="method" aria-label="Pagamento">${options(true)}</select></label>`}
         <div class="total"><span>Total</span><strong id="sale-total" aria-live="polite">${money(0)}</strong></div>
         <p class="error" role="alert"></p>
@@ -51,8 +62,8 @@ export function createOperationsUI(ctx) {
     });
     function update() {
       const items = selected(new FormData(form));
-      $("#sale-total").textContent = money(total(items));
-      form.querySelector("[type=submit]").disabled = !items.length;
+      $("#sale-total").textContent = money(paid ? paid.amount : total(items));
+      form.querySelector("[type=submit]").disabled = !paid && !items.length;
     }
     form.querySelectorAll("[data-pick]").forEach((button) => {
       button.onclick = () => {
@@ -75,36 +86,64 @@ export function createOperationsUI(ctx) {
     bindForm((fd) => ({
       type: reservation ? "edit-reservation" : reserve ? "reserve" : "sale",
       reservationId: reservation?.id, expectedRevision: reservation?.revision ?? 0,
-      items: selected(fd), customer: fd.get("customer"), location: fd.get("location"), method: fd.get("method"),
+      items: paid ? undefined : selected(fd), customer: fd.get("customer"),
+      location: fd.get("location") === "legacy" ? location : fd.get("location") ?? location,
+      method: fd.get("method"),
     }));
     update();
   }
 
   function payment(type, id) {
     const state = ctx.getState(), day = opened(state);
-    const refund = type === "refund";
+    const reservationRefund = type === "reservation-refund";
+    const refund = type === "refund" || reservationRefund;
     const complete = type === "complete";
-    const title = refund ? "Registrar reembolso" : complete ? "Concluir reserva" : "Receber pagamento";
-    const entry = (complete ? state.reservations : state.sales).find((v) => v.id === id);
+    const prepay = type === "reservation-payment";
+    const reservation = complete || prepay || reservationRefund;
+    const title = refund ? "Registrar reembolso" : complete ? "Concluir retirada"
+      : prepay ? "Registrar pagamento" : "Receber pagamento";
+    const entry = (reservation ? state.reservations : state.sales).find((v) => v.id === id);
     if (!entry) return;
+    const paid = complete && reservationPayment(state, id);
     if (!day) {
-      modal(refund ? "Abra um dia para registrar o reembolso" : "Abra um dia para receber",
-        `<p>${refund ? "A devolução" : "O pagamento"} entra no caixa do novo dia. Depois de abrir, volte a Pendências no Histórico.</p>
+      const guidance = complete ? "Depois de abrir, volte a Reservas e conclua a retirada."
+        : prepay ? "Abra um dia para lançar o valor nesse caixa. Em Reservas, registre o pagamento e informe a data em que recebeu."
+        : refund ? "A devolução entra no caixa do novo dia. Depois de abrir, volte a Pendências no Histórico."
+        : "O pagamento entra no caixa do novo dia. Depois de abrir, volte a Pendências no Histórico.";
+      modal("Abra um dia de vendas",
+        `<p>${guidance}</p>
         <button class="primary wide" id="open-for-payment">Abrir dia de vendas</button>`);
       $("#open-for-payment").onclick = openDay;
       return;
     }
     const business = businessDate(day);
-    const cashImpact = refund ? "Saída no caixa" : complete ? "Se receber agora, a entrada fica no caixa" : "Entrada no caixa";
+    const impact = paid ? `Pagamento de ${money(paid.amount)} via ${paid.method} recebido em ${stamp(paid.at)}. Confirme a entrega dos cookies.`
+      : `${refund ? "Saída no caixa" : complete ? "Se receber agora, a entrada fica no caixa" : "Entrada no caixa"} de ${displayDate(business)}.`;
+    const method = refund ? "reembolso" : "pagamento";
     modal(title, `<form>
       <p><strong>${esc(entry.customer || "Venda no balcão")}</strong> · ${money(total(entry.items))}<br>
-      <span class="muted">${complete ? "Reserva" : "Venda"} de ${stamp(entry.at)}. ${cashImpact} de ${displayDate(business)}.</span></p>
-      ${business !== localDate() ? '<p class="note">O dia aberto é anterior à data atual. Se o lançamento pertence a hoje, feche-o e abra o dia atual.</p>' : ""}
+      <span class="muted">${reservation ? "Reserva" : "Venda"} de ${stamp(entry.at)}. ${impact}</span></p>
+      ${business !== localDate() ? '<p class="note">O dia aberto é anterior à data atual. As operações ficam nesse dia até fechá-lo.</p>' : ""}
       ${refund ? '<p class="note">Confirme depois de devolver efetivamente o dinheiro ao cliente.</p>' : ""}
-      <label>Forma de ${refund ? "reembolso" : "pagamento"}<select name="method" aria-label="Forma de ${refund ? "reembolso" : "pagamento"}">${options(complete)}</select></label>
-      <p class="error" role="alert"></p><button class="primary" type="submit">${refund ? "Confirmar valor devolvido" : "Confirmar"}</button>
+      ${paid ? "" : `<label>Forma de ${method}<select name="method">${options(complete)}</select></label>`}
+      ${prepay ? `<details><summary>Informar data de recebimento anterior</summary>
+        <label>Data e hora em que recebeu<input name="receivedAt" type="datetime-local"></label>
+        <p class="muted">Se deixar em branco, o app usa o horário atual. O valor entra no caixa aberto.</p>
+      </details>` : ""}
+      <p class="error" role="alert"></p><button class="primary" type="submit">${refund ? "Confirmar valor devolvido"
+        : paid ? "Confirmar retirada" : prepay ? "Confirmar recebimento" : "Confirmar"}</button>
       </form>`);
-    bindForm((fd) => ({ type, reservationId: id, saleId: id, method: fd.get("method") }));
+    bindForm((fd) => {
+      const receivedAt = fd.get("receivedAt");
+      return {
+        type: reservationRefund ? "refund" : type,
+        reservationId: reservation ? id : undefined,
+        saleId: reservation ? undefined : id,
+        expectedRevision: reservation ? entry.revision ?? 0 : undefined,
+        method: fd.get("method"),
+        receivedAt: receivedAt ? new Date(receivedAt).toISOString() : undefined,
+      };
+    });
   }
 
   function settings() {
@@ -169,7 +208,7 @@ export function createOperationsUI(ctx) {
     const summary = (snapshot) => {
       const n = financial(snapshot);
       return `${snapshot.days.length} dias, ${snapshot.sales.length} vendas, ${snapshot.reservations.length} reservas.
-        Vendas após estornos ${money(n.gross)} · Caixa líquido ${money(n.cashNet)} · A receber ${money(n.pending)} · A reembolsar ${money(n.refundPending)}.`;
+        Vendas líquidas de estornos ${money(n.gross)} · Caixa líquido ${money(n.cashNet)} · A receber ${money(n.pending)} · A reembolsar ${money(n.refundPending)}.`;
     };
     modal("Conferir restauração", `<p><strong>Dados atuais</strong><br>${summary(before)}</p>
       <p><strong>Arquivo escolhido</strong><br>${summary(data)}</p>
