@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite";
@@ -12,9 +12,10 @@ const staticFiles = [
   "icons/cookies-black.png", "icons/cookies-nutella.png", "icons/cookies-red.png", "icons/cookies-tradicional.png",
 ];
 const worker = "sw.js";
-const component = "src/stock-cards.jsx";
-const bundle = "src/stock-cards.js";
-const allowed = new Set([...staticFiles, bundle, worker]);
+const reactSources = ["src/react-ui.jsx", "src/stock-cards.jsx", "src/history-summary.jsx"];
+const bundle = "src/react-ui.js";
+const previousBundle = "src/stock-cards.js";
+const allowed = new Set([...staticFiles, bundle, worker, previousBundle]);
 
 async function checkOutput(directory, prefix = "") {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -28,7 +29,7 @@ async function checkOutput(directory, prefix = "") {
 }
 
 export async function buildApp(output = "dist") {
-  await checkRepositoryData([...staticFiles, worker, component]);
+  await checkRepositoryData([...staticFiles, worker, ...reactSources]);
   await mkdir(output, { recursive: true });
   await checkOutput(output);
 
@@ -40,12 +41,12 @@ export async function buildApp(output = "dist") {
     build: {
       write: false,
       target: "safari15.4",
-      rolldownOptions: { input: component, preserveEntrySignatures: "strict" },
+      rolldownOptions: { input: reactSources[0], preserveEntrySignatures: "strict" },
     },
   });
   const [chunk, ...extra] = (Array.isArray(result) ? result : [result]).flatMap(({ output }) => output);
   if (extra.length || chunk?.type !== "chunk") {
-    throw new Error("Esperava um único módulo JavaScript dos cards de estoque.");
+    throw new Error("Esperava um único módulo JavaScript para os componentes React.");
   }
   const files = new Map(await Promise.all(staticFiles.map(async (file) => [file, await readFile(file)])));
   files.set(bundle, chunk.code);
@@ -64,6 +65,7 @@ export async function buildApp(output = "dist") {
     await mkdir(dirname(destination), { recursive: true });
     await writeFile(destination, content);
   }
+  await rm(join(output, previousBundle), { force: true });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

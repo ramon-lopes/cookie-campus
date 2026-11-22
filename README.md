@@ -1,6 +1,6 @@
 # Cookie Campus
 
-PWA mobile-first para vendas de cookies na faculdade. HTML, CSS e JavaScript com módulos ES, com React nos cards **Estoque por sabor**. Dados persistidos em IndexedDB. Arquivos da aplicação disponíveis offline via Service Worker.
+PWA mobile-first para vendas de cookies na faculdade. HTML, CSS e JavaScript com módulos ES, com React nos cards **Estoque por sabor** e nos indicadores do **Resumo geral** do Histórico. Dados persistidos em IndexedDB. Arquivos da aplicação disponíveis offline via Service Worker.
 
 ## Executar
 
@@ -18,7 +18,7 @@ Abra http://localhost:4173. `npm start` roda o build e serve a pasta `dist/`. Re
 npm run build
 ```
 
-Gera a aplicação estática em `dist/`. O Vite empacota o módulo React dos cards. Os demais arquivos publicáveis vêm de uma lista explícita. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor atende somente em `127.0.0.1`. A variável `PORT` permite uma origem separada para testes, com seu próprio IndexedDB.
+Gera a aplicação estática em `dist/`. O Vite empacota os componentes em um único módulo React. Os demais arquivos publicáveis vêm de uma lista explícita. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor atende somente em `127.0.0.1`. A variável `PORT` permite uma origem separada para testes, com seu próprio IndexedDB.
 
 ## Publicar no GitHub Pages
 
@@ -78,6 +78,7 @@ Backups não são criptografados. Guarde-os com cuidado, pois podem conter nomes
 - `src/operations-ui.js`: seleção de quantidades, edição de reservas, confirmação de pagamentos/reembolsos e conferência de restauração.
 - `src/history-ui.js`: resumo, detalhes e formatação de vendas, caixa e estoque.
 - `src/stock-cards.jsx`: cards React, renderizados em um elemento estável de Hoje com os saldos do domínio.
+- `src/history-summary.jsx`: indicadores do Resumo geral do Histórico, com os totais do domínio.
 - `src/access.js`: bloqueio local, verificação da senha e recuperação via Web Crypto.
 - `styles.css`: layout responsivo, formulários e áreas seguras do iPhone.
 - `sw.js`: cache dos recursos locais, sem fontes, scripts ou serviços externos.

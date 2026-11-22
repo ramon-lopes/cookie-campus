@@ -13,10 +13,8 @@ export function renderHistory(state, { money, esc, stamp, clock }) {
   const dateOf = (id) => displayDate(businessDate(state.days.find((d) => d.id === id)));
   const buyer = (sale) => esc(sale.customer || "Venda no balcão");
 
-  function metrics(n, overview = false) {
+  function dayMetrics(n) {
     return `<dl class="summary-grid">
-      ${overview ? `<div class="summary-tile"><dt>Vendas líquidas de estornos
-        <small>Total de todos os dias, excluindo as vendas estornadas.</small></dt><dd>${money(n.gross)}</dd></div>` : ""}
       <div class="summary-tile cash-tile"><dt>Caixa líquido</dt><dd>${money(n.cashNet)}</dd></div>
       <div class="summary-tile"><dt>A receber</dt><dd>${money(n.pending)}</dd></div>
       <div class="summary-tile"><dt>A reembolsar</dt><dd>${money(n.refundPending)}</dd></div>
@@ -176,7 +174,7 @@ export function renderHistory(state, { money, esc, stamp, clock }) {
       `<span><span class="pill ${day.closedAt ? "closed-pill" : ""}">${day.closedAt ? "Fechado" : "Aberto"}</span>
         ${repeatedDate ? `<small class="day-session">Abertura às ${clock(day.openedAt)}</small>` : ""}</span>
        <span class="day-value"><strong>${money(n.gross)}</strong><small>Vendas líquidas de estornos</small></span>`,
-      `${metrics(n)}${cashDetails(n, day.id)}${reservationReceipts(day.id)}
+      `${dayMetrics(n)}${cashDetails(n, day.id)}${reservationReceipts(day.id)}
        ${disclosure(`sales:${day.id}`, `Vendas (${daySales.length})`,
           daySales.map(saleEntry).join("") || '<p class="muted">Nenhuma venda neste dia.</p>', { open: day.id === activeDay?.id })}
        ${disclosure(`stock:${day.id}`, "Estoque e movimentações", inventory(day, daySales))}
@@ -208,11 +206,13 @@ export function renderHistory(state, { money, esc, stamp, clock }) {
     })),
   ];
 
-  return `<div class="heading"><h1>Histórico</h1><button id="backup">Backup</button></div>
-    <section class="history-overview" aria-label="Resumo geral">${metrics(all, true)}${cashDetails(all, "all")}</section>
-    <section class="pending-panel"><h2>Pendências de todos os dias</h2>
-      ${pendingGroup("receivables", "Pagamentos pendentes", all.pending, receivables)}
-      ${pendingGroup("refunds", "Reembolsos pendentes", all.refundPending, refunds)}
-    </section>
-    ${groups || '<p class="empty">Seu histórico aparecerá após abrir o primeiro dia.</p>'}`;
+  return {
+    totals: all,
+    overviewDetails: cashDetails(all, "all"),
+    entries: `<section class="pending-panel"><h2>Pendências de todos os dias</h2>
+        ${pendingGroup("receivables", "Pagamentos pendentes", all.pending, receivables)}
+        ${pendingGroup("refunds", "Reembolsos pendentes", all.refundPending, refunds)}
+      </section>
+      ${groups || '<p class="empty">Seu histórico aparecerá após abrir o primeiro dia.</p>'}`,
+  };
 }
