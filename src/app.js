@@ -13,7 +13,7 @@ import {
   reservationPayment,
 } from "./domain.js";
 import { read, mutate } from "./db.js";
-import { mountStockCards } from "./stock-cards.js";
+import { mountHistorySummary, mountStockCards } from "./react-ui.js";
 const $ = (s) => document.querySelector(s),
   money = (n) =>
     (n / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
@@ -46,7 +46,11 @@ const dialog = $("#dialog"),
       : null;
 const appView = $("#app-view");
 const todayStock = $("#today-stock");
+const historyView = $("#history-view");
+const historyOverviewDetails = $("#history-overview-details");
+const historyEntries = $("#history-entries");
 const renderStockCards = mountStockCards($("#stock-grid"), money);
+const renderHistorySummary = mountHistorySummary($("#history-summary"), money);
 function toast(message) {
   $("#toast").textContent = message;
   $("#toast").classList.add("show");
@@ -333,7 +337,7 @@ function reservationCard(r) {
 }
 const disclosures = new Map();
 function rememberDisclosures() {
-  for (const details of appView.querySelectorAll("[data-disclosure]"))
+  for (const details of historyView.querySelectorAll("[data-disclosure]"))
     disclosures.set(details.dataset.disclosure, details.open);
 }
 function navigate(next) {
@@ -346,6 +350,10 @@ function render() {
   const d = opened(state);
   todayStock.hidden = tab !== "hoje" || !d;
   if (todayStock.hidden) renderStockCards([]);
+  const showHistory = tab === "historico";
+  historyView.hidden = !showHistory;
+  appView.hidden = showHistory;
+  if (!showHistory) renderHistorySummary(null);
   rememberDisclosures();
   document.querySelectorAll("[data-tab]").forEach((b) => {
     const selected = b.dataset.tab === tab;
@@ -388,9 +396,11 @@ function render() {
         : '<p class="empty">Nenhuma reserva pendente.</p>'}</div>`;
     $("#reserve").onclick = () => sale(true);
   } else if (tab === "historico") {
-    appView.innerHTML = renderHistory(state, { money, esc, stamp, clock });
-    $("#backup").onclick = () => download(state);
-    for (const details of appView.querySelectorAll("[data-disclosure]")) {
+    const history = renderHistory(state, { money, esc, stamp, clock });
+    renderHistorySummary(history.totals);
+    historyOverviewDetails.innerHTML = history.overviewDetails;
+    historyEntries.innerHTML = history.entries;
+    for (const details of historyView.querySelectorAll("[data-disclosure]")) {
       if (disclosures.has(details.dataset.disclosure))
         details.open = disclosures.get(details.dataset.disclosure);
     }
@@ -416,6 +426,10 @@ const access = createAccess({
     appView.replaceChildren();
     todayStock.hidden = true;
     renderStockCards([]);
+    historyView.hidden = true;
+    renderHistorySummary(null);
+    historyOverviewDetails.replaceChildren();
+    historyEntries.replaceChildren();
     $("#dialog-body").replaceChildren();
     $("#toast").classList.remove("show");
     $("#toast").textContent = "";
@@ -437,6 +451,7 @@ $("#settings").onclick = () => ui.settings();
 $("#move").onclick = move;
 $("#share").onclick = share;
 $("#close").onclick = closeDay;
+$("#backup").onclick = () => download(state);
 $("#app").addEventListener("click", (e) => {
   const button = e.target.closest("button");
   if (!button || access.locked) return;
