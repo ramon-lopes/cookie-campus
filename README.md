@@ -1,103 +1,102 @@
 # Cookie Campus
 
-PWA mobile-first para vendas de cookies na faculdade. HTML, CSS e JavaScript com módulos ES, com React nos cards **Estoque por sabor** e nos indicadores do **Resumo geral** do Histórico. Dados persistidos em IndexedDB. Arquivos da aplicação disponíveis offline via Service Worker.
+Aplicativo web instalável (PWA) para registrar vendas de cookies, acompanhar o estoque por sabor, organizar reservas e conferir o caixa. O app funciona offline depois que o navegador prepara o cache na primeira abertura com internet.
 
-## Executar
+[Abrir o Cookie Campus](https://ramon-lopes.github.io/cookie-campus/)
 
-Requer Node.js 24 para os comandos de desenvolvimento e testes.
-
-```sh
-npm ci
-npm test
-npm start
-```
-
-Abra http://localhost:4173. `npm start` roda o build e serve a pasta `dist/`. Reinicie o servidor para ver mudanças nos arquivos. Os módulos JavaScript e o Service Worker precisam do servidor.
-
-```sh
-npm run build
-```
-
-Gera a aplicação estática em `dist/`. O Vite empacota os componentes em um único módulo React e compila as utilidades Tailwind de `src/stock-cards.jsx` em `dist/src/react-ui.css`. O piloto usa o prefixo `tw:` e omite o Preflight. O CSS compilado é servido localmente e entra na lista de arquivos do cache offline. `styles.css` mantém os estilos globais, formulários e áreas seguras.
-
-Os demais arquivos publicáveis vêm de uma lista explícita. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor atende somente em `127.0.0.1`. A variável `PORT` permite uma origem separada para testes, com seu próprio IndexedDB.
-
-## Publicar no GitHub Pages
-
-1. Crie um repositório no GitHub e envie estes arquivos para a branch `main` (não inclua `node_modules` nem backups de clientes).
-2. Em **Settings → Pages → Build and deployment**, selecione **GitHub Actions**.
-3. Execute o workflow **Publicar no GitHub Pages**, ou envie um commit para `main`.
-4. O workflow executa `npm ci`, os testes e o build, e publica `dist/`. A URL aparece no resultado do deploy.
-
-O arquivo `.github/workflows/pages.yml` publica a partir da branch `main`. Todos os caminhos são relativos, permitindo publicação em `https://USUARIO.github.io/REPOSITORIO/`. No repositório oficial, o merge para `main` inicia o deploy. Revise o PR e aprove a publicação antes de fazer o merge.
+Os registros ficam no navegador e na origem em que foram criados. Para transferir dados entre navegadores, origens ou aparelhos, exporte e restaure um backup JSON.
 
 ## Instalar no iPhone
 
-1. Abra a URL **HTTPS publicada** no Safari.
-2. Aguarde a primeira abertura com internet.
-3. Compartilhar → **Adicionar à Tela de Início** → Adicionar.
-4. Abra pelo ícone; antes do primeiro dia real, teste em modo avião após a instalação.
+1. Abra o Cookie Campus no Safari com internet.
+2. No menu de compartilhamento, toque em **Adicionar à Tela de Início**.
+3. Se aparecer a opção **Abrir como App da Web**, ative-a e toque em **Adicionar**.
+4. Abra pelo novo ícone com internet. Antes de usar em vendas, ative o modo avião e teste a reabertura pelo ícone.
 
-O localhost do computador não é acessível como localhost do iPhone. A instalação e o cache offline no aparelho exigem HTTPS. As larguras testadas em navegador e as verificações no aparelho estão registradas em [VERIFICACAO.md](VERIFICACAO.md).
+Consulte o passo a passo do Safari no [Manual do iPhone](https://support.apple.com/guide/iphone/open-as-web-app-iphea86e5236/27/ios/27).
 
-## Rotina de uso
+Para receber uma atualização, acesse com internet e feche as abas e janelas antigas do app para que a nova versão possa ativar. Depois, reabra pelo mesmo endereço ou ícone. O cache guarda os arquivos do app e o IndexedDB guarda os registros.
 
-- **Hoje → Abrir dia**: confira as sobras confirmadas no último fechamento e informe apenas o recebimento novo. O total soma as duas origens por sabor. O app aproveita as sobras na próxima abertura, inclusive após um intervalo entre vendas. Há um dia aberto por vez. A data comercial segue o fuso local, e passar da meia-noite mantém o dia aberto até o fechamento.
-- **Venda rápida**: botões `+`/`−` por sabor, vários sabores, Pix por padrão e nome opcional recolhido. Total e confirmação ficam na base do formulário. A validação definitiva do estoque continua na transação IndexedDB.
-- **Reservas → Nova reserva** abre uma lista de locais de retirada. Em **Editar**, o local anterior aparece selecionado, inclusive se foi digitado em uma versão antiga. Antes de receber, é possível alterar cliente, local e itens. Os sabores mantidos preservam o preço reservado. Depois de receber, a edição permite mudar o cliente e o local com o valor e os itens já confirmados.
-- **Reservas → Registrar pagamento** confirma o valor integral e o meio no caixa aberto. Para um recebimento anterior, abra **Informar data de recebimento anterior** e informe a data e a hora reais. Se o dia estiver fechado, abra um dia e registre o recebimento na reserva. A entrada fica no caixa que está aberto, inclusive quando a data efetiva é anterior. **Concluir retirada** reutiliza o pagamento. Para cobrar na retirada, vá direto a **Concluir retirada** e escolha o meio ou **Pendente**.
-- **Cancelar uma reserva paga** libera os cookies e mantém o recebimento registrado. Em **Histórico → Reembolsos pendentes**, use **Registrar reembolso** após devolver o dinheiro. A saída é registrada no caixa aberto e os detalhes permanecem no Histórico.
-- **Movimentar estoque**: recebimento adicional, perda ou ajuste com motivo. Ajustes aceitam números positivos e negativos. Não é permitido consumir estoque reservado.
-- **Histórico → Pendências de todos os dias → Receber**: quita integralmente uma venda, sem faturar novamente. A confirmação mostra a data da venda e o dia operacional que receberá a entrada. Sem dia aberto, o app orienta a abertura; depois volte às pendências. O MVP não faz parcelamento ou recebimento parcial.
-- **Histórico → Vendas → detalhes da venda → Estornar**: preserva a venda e o pagamento, registra motivo e recompõe o estoque. Se houve pagamento, cria um **reembolso pendente**; a entrada não desaparece do caixa. Após devolver efetivamente o dinheiro, use **Registrar reembolso**, escolhendo o meio de devolução. Pode ser registrado em outro dia aberto. Correção = estornar e registrar uma nova venda. Estornos de vendas continuam restritos ao dia aberto; dias fechados preservam sua conciliação.
-- **Conferir e fechar** exige resolver as reservas ainda sem pagamento. Reservas pagas podem aguardar a retirada em outro dia. Separe fisicamente seus cookies e conte apenas as unidades livres. Em **Reaproveitar**, confirme quantas unidades livres vão para a próxima abertura. Ao concluir uma retirada posterior, o app usa os cookies separados e reconhece a venda no dia da retirada. Se uma reserva paga de outro dia for cancelada, os itens voltam ao estoque do dia aberto.
-- **Configurações**: cadastrar, editar, desativar sabores e alterar preços. Vendas e reservas existentes preservam o preço original.
-- **Divulgar no WhatsApp**: copia mensagem com preços e sabores ativos com estoque disponível; não envia mensagens automaticamente.
+O layout e a recarga offline foram verificados em Chromium e WebKit. A instalação, o teclado nativo e o modo avião na PWA instalada ainda precisam de verificação no iPhone físico. Veja o [registro de verificação](VERIFICACAO.md).
 
-## Backup e proteção
+## Rotina de vendas
 
-Em **Configurações → Senha de acesso**, defina uma senha local de pelo menos 8 caracteres. Guarde o código de recuperação exibido após configurar ou alterar a senha. Use **Bloquear agora** ou feche e reabra o app. A tela de entrada pede somente a senha. **Esqueci a senha** aceita o código e permite criar outra senha e outro código. Se perder os dois, é possível recuperar os registros presentes no último backup restaurando-o em outro navegador ou aparelho.
+1. Em **Hoje → Abrir dia**, confira as sobras da última sessão e informe apenas o recebimento novo. O app soma as duas origens por sabor. Há um dia operacional aberto por vez. Mesmo após a meia-noite, os lançamentos ficam nesse dia até o fechamento.
+2. Em **Venda rápida**, adicione as quantidades por sabor, selecione o meio de pagamento e confira o total. Pix é a opção inicial. Use **Pendente** para receber depois ou **Adicionar nome do cliente** para identificar a venda.
+3. Em **Movimentar estoque**, registre recebimentos adicionais, perdas ou ajustes e informe o motivo. O estoque reservado fica separado do saldo disponível.
+4. Em **Conferir e fechar dia**, resolva as reservas sem pagamento e conte apenas as unidades livres. Registre divergências antes de fechar. Em **Reaproveitar**, informe as sobras que devem entrar na próxima abertura. Mantenha fisicamente separados os cookies das reservas pagas que aguardam retirada.
 
-A senha é um bloqueio da interface e funciona offline com a PWA já carregada. O navegador guarda verificadores PBKDF2-SHA-256 com sais aleatórios para senha e recuperação. IndexedDB, cópias locais e JSON permanecem em formato legível. A senha é específica do navegador, fica fora do JSON e continua ativa ao restaurar dados no mesmo aparelho. As ações de exportar, restaurar e acessar cópias de recuperação ficam atrás da tela de desbloqueio. A configuração usa Web Crypto nativo em HTTPS ou localhost, sem serviço externo e sem dependência de produção.
+Em **Configurações**, você pode adicionar, editar ou desativar sabores. Registros existentes preservam os preços de venda e de reserva. **Divulgar no WhatsApp** prepara um texto com os sabores disponíveis e seus preços para você copiar e enviar.
 
-Exporte JSON diariamente em Configurações ou Histórico. Os dados ficam somente neste navegador/aparelho e não são sincronizados entre dispositivos. Limpar dados do navegador, desinstalar ou mecanismos de limpeza de armazenamento do sistema podem remover registros; o backup externo é essencial.
+### Reservas
 
-O formato JSON preserva os backups anteriores. Os novos registros podem trazer `reservationId` no pagamento e `finishedDayId` ou `refund` na reserva. Na retirada, o pagamento antecipado ganha o vínculo `saleId`, mantendo o horário, o meio e o dia de caixa originais. Para restaurar um backup com os novos campos, use esta versão ou uma posterior. Os backups operacionais continuam separados da senha local.
+- **Nova reserva** separa as quantidades do estoque livre e exige cliente e local de retirada. **Editar** permite mudar itens, cliente e local antes do pagamento. Depois de pago, você pode atualizar o cliente e o local. Sabores mantidos na reserva conservam o preço original.
+- **Registrar pagamento** lança o valor integral no caixa aberto para uma reserva desse dia. Se o cliente já pagou, use **Informar data de recebimento anterior** para registrar quando o dinheiro entrou. O lançamento pertence ao caixa aberto.
+- **Concluir retirada** registra a venda no dia da entrega. Se o pagamento já foi lançado, o app o reaproveita. Você também pode receber na retirada ou marcar **Pendente**. Reservas pagas podem atravessar o fechamento.
+- **Cancelar** libera os cookies no estoque do dia aberto. Se a reserva estava paga, a devolução fica em **Histórico → Pendências de todos os dias → Reembolsos pendentes**.
 
-Na importação, o app valida versão, entidades, referências, quantidades, preços, estoque, pagamentos, reembolsos e conciliação. Exibe a comparação com os dados atuais e mantém **Substituir dados e restaurar** desabilitado até marcar o consentimento explícito. **Cancelar** não altera nada. Baixar o backup é uma ação separada: o app informa que o download foi solicitado e não afirma que o arquivo foi salvo. Confira em Arquivos/Downloads.
+### Histórico, pagamentos e caixa
 
-A restauração grava uma cópia independente do estado anterior e o novo estado na mesma transação. Se faltar espaço ou qualquer gravação falhar, ambos são desfeitos. Alterações feitas por outra aba depois da conferência bloqueiam a restauração. Todas as cópias anteriores, incluindo a chave legada `before-restore`, são preservadas. Use **Cópias anteriores à restauração** para exportar uma delas e depois importá-la. Não há limpeza automática dessas cópias; elas ocupam espaço local e não substituem backups externos.
+| Indicador | O que representa |
+| --- | --- |
+| **Vendas líquidas de estornos** | Valor das vendas pelo dia em que foram registradas, descontados os estornos. |
+| **Caixa líquido** | Entradas registradas menos devoluções, no dia do lançamento em caixa. Registros antigos podem incluir devoluções presumidas, indicadas no Histórico. |
+| **A receber** | Valores de vendas com pagamento pendente. |
+| **A reembolsar** | Valores de estornos ou reservas canceladas que ainda aguardam devolução. |
 
-`.gitignore` exclui JSON por padrão (exceto `package.json` e `package-lock.json`) e as pastas `backups/`, `exports/`, `recovery/` e `private/`. A checagem do build detecta também arquivos rastreados com conteúdo de backup, mesmo renomeados. Não use `git add -f` para contornar essa proteção. O build não inclui backups nem imagens de verificação. Essas medidas previnem inclusão acidental no fluxo normal; não impedem um envio manual que ignore as proteções.
+Em **Histórico → Pendências de todos os dias**, use **Receber** para quitar uma venda integralmente no caixa aberto, preservando a data da venda. Para corrigir uma venda, use **Estornar** nos detalhes de uma venda do dia aberto e registre a nova venda. Se houve pagamento, use **Registrar reembolso** depois de devolver o dinheiro. A saída entra no caixa aberto no momento do registro, inclusive em um dia posterior ao da venda.
 
-Backups não são criptografados. Guarde-os com cuidado, pois podem conter nomes de clientes. Não envie backups ao repositório público. A validação detecta inconsistências estruturais e de negócio, mas não autentica a origem de um arquivo deliberadamente adulterado.
+Os meios de pagamento são lançados manualmente. Confira os recebimentos diretamente no banco ou na maquininha. O resumo acompanha vendas e caixa operacional. Parcelamento, recebimento parcial, taxas de cartão, custos, lucro e conciliação bancária ficam fora desse cálculo.
 
-## Regras e arquitetura
+## Backup e segurança
 
-- `src/domain.js`: funções de negócio puras, centavos inteiros, preços históricos, validação e backup.
-- `src/db.js`: um snapshot do estado em IndexedDB. Leitura, validação e gravação ocorrem na mesma transação `readwrite`, incluindo operações com vários sabores.
-- `src/app.js`: interface, formulários, feedback, navegação e atualização entre abas.
-- `src/operations-ui.js`: seleção de quantidades, edição de reservas, confirmação de pagamentos/reembolsos e conferência de restauração.
-- `src/history-ui.js`: resumo, detalhes e formatação de vendas, caixa e estoque.
-- `src/stock-cards.jsx`: cards React, renderizados em um elemento estável de Hoje com os saldos do domínio.
-- `src/history-summary.jsx`: indicadores do Resumo geral do Histórico, com os totais do domínio.
-- `src/access.js`: bloqueio local, verificação da senha e recuperação via Web Crypto.
-- `styles.css`: layout responsivo, formulários e áreas seguras do iPhone.
-- `sw.js`: cache dos recursos locais, sem fontes, scripts ou serviços externos.
-- `test/`: testes de negócio, integração com IndexedDB emulado e Service Worker.
+> **Exporte um backup ao fechar o dia e antes de trocar de aparelho ou limpar os dados do navegador.** O armazenamento local pode ser removido pelo usuário ou pelo sistema. Mantenha uma cópia fora do navegador, em local privado e fora do repositório. O JSON é legível e pode conter nomes de clientes.
 
-Disponível = recebimentos novos + sobras aproveitadas + ajustes líquidos + devoluções de reservas de dias anteriores − perdas − vendas que usam o estoque do dia − reservas separadas nesse dia. Cada envio possui identificador idempotente e bloqueio de botão durante a gravação. O IndexedDB serializa transações concorrentes e revalida o estoque.
+### Exportar e restaurar
 
-**Vendas líquidas de estornos** soma as vendas registradas, excluindo as estornadas pelo dia operacional da venda. O resumo geral cobre todos os dias e cada dia mostra seu próprio total junto à data. **Caixa líquido** soma as entradas e desconta os reembolsos efetivos no dia operacional do lançamento e pelo meio efetivo. Um pagamento antecipado entra no caixa quando registrado. A venda correspondente entra no total ao concluir a retirada. Estornos antigos sem informação de reembolso preservam a devolução presumida, sinalizada no Histórico. Veja o exemplo e os limites da auditoria em [VERIFICACAO.md](VERIFICACAO.md).
+1. Use **Histórico → Backup** ou **Configurações → Backup → Exportar backup**. Confira em **Arquivos** ou **Downloads** se o arquivo foi salvo.
+2. No destino, abra **Configurações → Backup → Restaurar JSON** e escolha o arquivo. Use a versão atual do app para importar backups antigos compatíveis ou arquivos exportados por esta versão. Importe arquivos de origem confiável.
+3. Compare os dados atuais com os dados do arquivo. Se quiser exportar o estado atual antes da troca, use **Baixar backup dos dados atuais**. Para concluir a substituição, marque o consentimento e toque em **Substituir dados e restaurar**.
 
-O banco continua na versão 1 e no mesmo object store. Os fechamentos novos podem guardar uma seleção de sobras. A abertura grava a origem por sabor na mesma transação do dia novo. A importação valida correspondência exata entre a seleção e as movimentações do dia seguinte na sequência de aberturas. Fechamentos legados continuam válidos sem seleção e o saldo histórico legado fica disponível na consulta. Datas comerciais antigas são calculadas a partir de `openedAt` no fuso local sem regravar o `label` UTC antigo. Mantenha o fuso do aparelho correto; registros legados não guardam o fuso original. Nenhum custo, lucro, taxa de cartão ou conciliação bancária é calculado. Registrar Pix não verifica o banco.
+A restauração valida o formato, os vínculos entre registros e as regras do estoque e do caixa. A substituição e a cópia local do estado anterior são gravadas na mesma transação. Se houver falha de gravação, os dados atuais são preservados. Se outra aba alterar os dados após a conferência, confira novamente antes de restaurar. As cópias anteriores ficam em **Configurações → Backup → Cópias anteriores à restauração** e compartilham o armazenamento do navegador.
 
-## Atualizações e offline
+### Bloqueio de acesso
 
-O build gera a lista de arquivos do cache e calcula a versão a partir do conteúdo publicado, incluindo o componente React. Cada instalação usa o cache do seu escopo. Uma atualização aguarda o fechamento das abas antigas antes de ativar. Feche o aplicativo e reabra com internet para receber a nova versão. Os registros operacionais continuam no IndexedDB.
+Em **Configurações → Senha de acesso**, configure uma senha de pelo menos oito caracteres e guarde o código de recuperação. Para trancar a interface durante o uso, toque em **Bloquear agora**. Na tela de entrada, **Esqueci a senha** permite configurar outra senha com o código. Se você perder os dois, recupere os registros do último backup em outro navegador ou aparelho.
 
-## Verificações
+O bloqueio é opcional e local ao navegador. O app usa Web Crypto para verificar a senha e o código com PBKDF2-HMAC-SHA-256 e sais separados. Quem tiver acesso ao armazenamento do perfil do navegador poderá ler os registros e as cópias locais. A senha fica fora do arquivo JSON, e restaurar dados no mesmo navegador preserva o bloqueio configurado. O GitHub Pages hospeda os arquivos do app. O navegador armazena os dados operacionais.
 
-Execute `npm test` e `npm run build`. A suíte cobre a passagem de 17 para 18/11/2026, intervalo entre dias, reenvios, concorrência de abas, estoque reservado, estorno com devolução em outro dia e restauração legada.
+## Desenvolvimento
 
-No iPhone físico, confira o alcance com uma mão, VoiceOver, área segura e teclado do Safari, exportação/importação via Arquivos, instalação e atualização da PWA e operação em modo avião.
+Use **Node.js 24** e execute na raiz do repositório.
+
+```sh
+npm ci
+npm start
+```
+
+Abra [localhost:4173](http://localhost:4173). O comando compila e serve `dist/` apenas no próprio computador. Reinicie o servidor após mudanças. A variável `PORT` permite criar outra origem local para usar dados fictícios em testes. Use a mesma URL local para reencontrar seus registros. O localhost do computador e a versão publicada têm bancos separados.
+
+```sh
+npm test
+npm run build
+node scripts/check-data.mjs
+```
+
+### Organização do código
+
+| Caminho | Responsabilidade |
+| --- | --- |
+| [`src/domain.js`](src/domain.js) | Regras de vendas, estoque e caixa, valores em centavos, validação e compatibilidade de backups. |
+| [`src/db.js`](src/db.js) e [`src/access.js`](src/access.js) | Persistência transacional em IndexedDB e bloqueio local. |
+| [`src/app.js`](src/app.js), [`src/operations-ui.js`](src/operations-ui.js) e [`src/history-ui.js`](src/history-ui.js) | Navegação, formulários e Histórico. |
+| [`src/stock-cards.jsx`](src/stock-cards.jsx) e [`src/history-summary.jsx`](src/history-summary.jsx) | Cards de estoque e indicadores do Resumo geral em React. |
+| [`styles.css`](styles.css) e [`src/stock-utilities.css`](src/stock-utilities.css) | Estilos do app e piloto de Tailwind restrito aos cards de estoque, sem Preflight. |
+| [`scripts/build.mjs`](scripts/build.mjs) e [`sw.js`](sw.js) | Build com Vite e cache offline versionado, incluindo o CSS compilado. |
+| [`test/`](test/) | Testes de domínio, IndexedDB emulado, restauração, build e cache offline. |
+
+### Publicação
+
+O [workflow de PR](.github/workflows/validar-pr.yml) roda os testes e o build para mudanças destinadas à `main`. O [workflow de publicação](.github/workflows/pages.yml) executa as verificações novamente e publica `dist/` no GitHub Pages após um push para `main`, inclusive o gerado pelo merge de um PR. Também pode ser iniciado manualmente em **Actions**. Revise a publicação antes de mesclar.
+
+O build usa uma lista explícita de arquivos publicáveis. O `.gitignore` exclui as pastas de dados privados e os JSONs que não são metadados de dependências. A checagem detecta formatos de backup conhecidos, inclusive arquivos renomeados quando seu conteúdo ainda corresponde ao formato. Essas medidas reduzem o risco de inclusão acidental. Mantenha backups e dados de clientes fora do repositório e dos artefatos publicados.
