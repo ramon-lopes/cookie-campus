@@ -25,6 +25,11 @@ html {
 
 body {
   margin: 0;
+}
+
+:where(.stock-top h3, .picker-row > div:first-child, .stock-form-row legend, .receipt,
+  .reservations-list .row, .settings-section .row, .pending-row, .sale-main, .inventory-head,
+  .detail-list dt, .recovery-code, .error, #toast) {
   overflow-wrap: anywhere;
 }
 
@@ -181,14 +186,32 @@ p {
 }
 
 .hero {
-  background: var(--green);
-  border-radius: 24px;
-  padding: 27px;
-  color: #fff;
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.875rem;
+  padding: 1rem;
+  border-radius: 1.125rem;
+  background: #efe8d8;
+  color: var(--green);
+}
+
+.hero > div {
+  display: grid;
+  flex: 2 1 12rem;
+  gap: 0.25rem;
+}
+
+.hero > div > span {
+  color: #645440;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.hero strong {
+  font-size: clamp(1.375rem, 6vw + 0.35rem, 2rem);
+  line-height: 1.1;
+  letter-spacing: -0.035em;
 }
 
 .primary {
@@ -197,36 +220,69 @@ p {
 }
 
 .hero button {
-  background: #e9bc77;
-  color: #263c30;
-  white-space: nowrap;
-  box-shadow: 0 3px 0 #0002;
+  flex: 1 1 9rem;
+  min-height: 52px;
+  touch-action: manipulation;
+}
+
+.hero button:active {
+  background: #122d25;
+}
+
+.hero button span {
+  margin-inline-end: 0.2em;
+}
+
+.metrics,
+.summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin: 20px 0 30px;
+  margin: 0.625rem 0 0;
 }
 
-.metric {
-  padding: 20px;
+.metric,
+.summary-tile {
+  display: grid;
+  flex: 1 1 7rem;
+  min-inline-size: min-content;
+  align-content: space-between;
+  gap: 0.375rem;
+  padding: 0.75rem;
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 17px;
+  border-radius: 0.875rem;
 }
 
-.metric small {
+.metric dt,
+.summary-tile dt {
   color: var(--muted);
-  display: block;
-  margin-bottom: 12px;
-  font-size: 12px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  font-weight: 650;
 }
 
-.metric strong {
-  font-size: 25px;
-  letter-spacing: -0.8px;
+.metric dd,
+.summary-tile dd {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.2;
+  font-weight: 750;
+}
+
+.hero strong,
+.metric dd,
+.summary-tile dd,
+.stock-top .price,
+.stock-available strong,
+.stock-info dd,
+.picker-row [data-price],
+#sale-total {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .section-title {
@@ -241,6 +297,22 @@ p {
   font-size: 12px;
   background: transparent;
   padding: 8px;
+}
+
+#today-stock .section-title {
+  flex-wrap: wrap;
+  margin-block: 1.5rem 0.625rem;
+}
+
+#today-stock .section-title h2 {
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+#today-stock .section-title button {
+  background: #e9eee5;
+  font-size: 0.8125rem;
+  padding-inline: 0.75rem;
 }
 
 .grid {
@@ -510,39 +582,12 @@ textarea {
     font-size: 28px;
   }
 
-  .metrics {
-    gap: 7px;
-    margin-top: 14px;
-  }
-
-  .metric {
-    padding: 15px 10px;
-  }
-
-  .metric strong {
-    font-size: 20px;
-  }
-
-  .metric small {
-    font-size: 11px;
-  }
-
   .grid {
     gap: 10px;
   }
 
   .card {
     padding: 14px;
-  }
-
-  .stock-top {
-    gap: 8px;
-    align-items: flex-start;
-  }
-
-  .stock-top h3 {
-    font-size: 14px;
-    line-height: 1.35;
   }
 
   .pill {
@@ -559,7 +604,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 7px;
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
 }
@@ -605,53 +650,12 @@ textarea {
   flex-shrink: 0;
 }
 
-.hero {
-  padding: clamp(14px, 4vw, 25px);
-}
-
-.hero > div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.hero > div span {
-  color: #dce9de;
-  font-size: 13px;
-}
-
-.hero strong {
-  font-size: clamp(19px, 5.8vw, 28px);
-  letter-spacing: -0.035em;
-}
-
-.hero button {
-  min-height: 50px;
-  padding-inline: 12px;
-  white-space: normal;
-}
-
-.today-metrics {
-  margin-bottom: 18px;
-}
-
-.today-metrics .metric small {
-  margin-bottom: 5px;
-}
-
-.today-metrics .metric strong {
-  font-size: clamp(14px, 4vw, 23px);
-}
-
 .stock-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.75rem), 1fr));
 }
 
 .stock-card {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 10px;
-  min-width: 0;
+  border: 1px solid #e5e1d5;
 }
 
 @supports (grid-template-rows: subgrid) {
@@ -661,77 +665,77 @@ textarea {
   }
 }
 
-.stock-top {
-  display: flex;
-  gap: 9px;
-  align-items: flex-start;
-  min-width: 0;
+.stock-top > div {
+  min-inline-size: 0;
 }
 
 .stock-top h3 {
-  margin: 0 0 4px;
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
   line-height: 1.25;
 }
 
 .stock-icon {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
+  width: 1.875rem;
+  height: 1.875rem;
+  padding: 0.1875rem;
+  border-radius: 0.5rem;
+  background: #f4eee1;
   object-fit: contain;
 }
 
+.stock-top .price {
+  font-size: 0.8125rem;
+}
+
 .stock-available {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 3px 7px;
-  align-content: center;
-  min-height: 46px;
-  font-size: 13px;
+  gap: 0.1875rem 0.4375rem;
+  align-content: start;
+  font-size: 0.8125rem;
   color: var(--green);
 }
 
 .stock-available strong {
-  font-size: 31px;
+  font-size: 1.875rem;
   line-height: 1;
-  font-variant-numeric: tabular-nums;
 }
 
-.stock-zero {
-  color: #675239;
+.stock-available[data-balance="empty"] {
+  color: #884739;
+}
+
+.stock-available[data-balance="held"] {
+  color: #754717;
 }
 
 .stock-info {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 4.25rem), 1fr));
+  gap: 0.375rem;
   margin: 0;
   border-top: 1px solid var(--line);
-  padding-top: 8px;
+  padding-top: 0.5rem;
 }
 
 .stock-info > div {
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 2px;
-  padding: 4px;
+  display: grid;
+  align-content: space-between;
+  gap: 0.125rem;
 }
 
 .stock-info dt {
-  font-size: 11px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
 .stock-info dd {
   margin: 0;
-  font-weight: 760;
-  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  font-weight: 700;
 }
 
 .stock-info .reserved-highlight {
-  border-radius: 7px;
-  background: #faedda;
-  color: #674318;
+  color: #754717;
 }
 
 .stock-info .reserved-highlight dt {
@@ -810,44 +814,27 @@ textarea {
 }
 
 .summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
   margin: 0;
 }
 
 .summary-tile {
-  display: grid;
-  gap: 5px;
-  align-content: space-between;
-  padding: 12px;
-  background: white;
-  border: 1px solid var(--line);
-  border-radius: 13px;
+  flex-basis: 8rem;
 }
 
-.summary-tile dt {
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 650;
+#history-summary > :first-child {
+  flex-basis: 11.5rem;
 }
 
 .summary-tile dt small {
   display: block;
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
-.summary-tile dd {
-  margin: 0;
-  font-size: clamp(16px, 4.8vw, 27px);
-  font-weight: 760;
-  font-variant-numeric: tabular-nums;
-}
-
 .cash-tile {
-  background: #eaf1e7;
+  background: #ebf0e5;
+  color: var(--green);
 }
 
 .pending-panel {
@@ -968,10 +955,6 @@ textarea {
 
 .day-entry .cash-tile {
   background: #edf2eb;
-}
-
-.day-entry .summary-tile dd {
-  font-size: 17px;
 }
 
 .detail-list {
@@ -1115,10 +1098,6 @@ dialog[open]:has(.sale-form) {
   margin-block: 12px;
 }
 
-.picker-row {
-  gap: 7px;
-}
-
 .sale-footer {
   padding: 9px 3px 3px;
   border-top: 1px solid var(--line);
@@ -1210,16 +1189,22 @@ dialog[open]:has(.sale-form) {
   }
 }
 
-@media (max-width: 350px) {
-  .stock-card {
-    padding: 10px;
+@media (prefers-reduced-motion: no-preference) {
+  .hero button {
+    transition: background-color 130ms ease-out;
   }
 
-  .stock-top {
-    gap: 5px;
+  .history-overview .disclosure > summary::after {
+    transition: transform 130ms ease-out;
   }
 
-  .hero {
-    gap: 8px;
+  .history-overview .disclosure[open] > .disclosure-body,
+  .sale-form details[open] > label {
+    animation: reveal-details 130ms ease-out;
   }
+}
+
+@keyframes reveal-details {
+  from { opacity: 0.65; }
+  to { opacity: 1; }
 }

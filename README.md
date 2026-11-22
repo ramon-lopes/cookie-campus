@@ -18,7 +18,9 @@ Abra http://localhost:4173. `npm start` roda o build e serve a pasta `dist/`. Re
 npm run build
 ```
 
-Gera a aplicação estática em `dist/`. O Vite empacota os componentes em um único módulo React. Os demais arquivos publicáveis vêm de uma lista explícita. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor atende somente em `127.0.0.1`. A variável `PORT` permite uma origem separada para testes, com seu próprio IndexedDB.
+Gera a aplicação estática em `dist/`. O Vite empacota os componentes em um único módulo React e compila as utilidades Tailwind de `src/stock-cards.jsx` em `dist/src/react-ui.css`. O piloto usa o prefixo `tw:` e omite o Preflight. O CSS compilado é servido localmente e entra na lista de arquivos do cache offline. `styles.css` mantém os estilos globais, formulários e áreas seguras.
+
+Os demais arquivos publicáveis vêm de uma lista explícita. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor atende somente em `127.0.0.1`. A variável `PORT` permite uma origem separada para testes, com seu próprio IndexedDB.
 
 ## Publicar no GitHub Pages
 
@@ -36,7 +38,7 @@ O arquivo `.github/workflows/pages.yml` publica a partir da branch `main`. Todos
 3. Compartilhar → **Adicionar à Tela de Início** → Adicionar.
 4. Abra pelo ícone; antes do primeiro dia real, teste em modo avião após a instalação.
 
-O localhost do computador não é acessível como localhost do iPhone. Acesso HTTP por IP de rede não substitui HTTPS para instalação e funcionamento offline. O layout foi verificado em viewport de 390 × 844; Safari/iPhone físico não foi testado neste ambiente.
+O localhost do computador não é acessível como localhost do iPhone. A instalação e o cache offline no aparelho exigem HTTPS. As larguras testadas em navegador e as verificações no aparelho estão registradas em [VERIFICACAO.md](VERIFICACAO.md).
 
 ## Rotina de uso
 

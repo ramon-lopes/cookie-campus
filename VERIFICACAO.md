@@ -104,3 +104,14 @@ Criados manifest, Service Worker, ícones PNG/SVG, build estático, workflow Git
 Não foi realizada publicação externa nem teste em Safari/iPhone físico. O repositório não possui remote. A integração IndexedDB automatizada usa `fake-indexeddb`; a persistência também foi observada no navegador real após recarga e reabertura. A hospedagem nova terá banco vazio, independente dos dados de teste no localhost.
 
 O MVP trabalha com recebimento integral e estorno no dia aberto. Não sincroniza aparelhos, não integra bancos e não apura custos/lucro. Backup JSON externo deve fazer parte do fechamento diário.
+
+## Tela Hoje no iPhone · 22/11/2026
+
+- Base da comparação: `d845ef7`, merge do PR #6. O patch `410bdb7` foi usado para revisar o Resumo geral e a integração React. A versão anterior da prévia veio do ZIP do Histórico e seus arquivos de interface conferem com a base.
+- Em `styles.css`, os indicadores de Hoje e o Resumo geral usam a largura mínima do conteúdo para passar à linha seguinte. Valores monetários ficam juntos e as quebras de emergência ficam nos campos de texto livre. A grade de estoque usa uma coluna quando duas deixariam os nomes e rótulos apertados. A disponibilidade tem mais destaque que as contagens de apoio, e os estados zerado e reservado têm cor e texto.
+- A Venda Rápida usa um botão verde de 52 px de altura mínima, com feedback de toque em CSS. A abertura de detalhes usa uma transição breve quando o sistema permite movimento. A ideia de feedback ao pressionar veio do catálogo. A implementação usa CSS do app. [Prompt Input no 21st.dev](https://21st.dev/%40aadixc0de/components/prompt-input)
+- O Tailwind ficou em `src/stock-cards.jsx` e usa apenas utilidades com prefixo `tw:`. O Vite compila essas regras sem Preflight em `dist/src/react-ui.css`. A folha é carregada pelo HTML e entra na revisão e no precache do Service Worker. [Tailwind CSS](https://tailwindcss.com/docs/preflight)
+- Passaram `npm test` (45 testes), `npm run build`, `node scripts/check-data.mjs` e `git diff --check`. O teste da PWA confere que as utilidades estão no build e que a folha pode ser carregada offline sob o caminho do GitHub Pages.
+- A prévia usa portas locais distintas para antes e depois, com IndexedDB e cache separados. O cenário tem nomes longos, uma palavra sem espaços, valores e quantidades em milhares, reserva parcial, saldo todo reservado e estoque esgotado.
+- No Chromium e no WebKit em 320 × 568, 390 × 844 e 402 × 874, foram verificados layout, foco, posição dos controles e texto com tamanho de fonte raiz a 200%. A conferência da Venda Rápida usou a viewport reduzida para simular o teclado. Também passaram a gravação de venda e reserva, exportação de backup e recarga com a rede desativada após a ativação do Service Worker.
+- A PWA instalada no iPhone físico, o teclado nativo, o alcance com uma mão, as áreas seguras e a recarga em modo avião seguem pendentes. O ZIP inclui duas capturas de navegador da revisão anterior.

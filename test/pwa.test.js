@@ -61,6 +61,10 @@ test("PWA: build, precache completo e fallback offline sob o caminho do Pages", 
   assert.match(cached.get(reactBundle), /mountStockCards/);
   assert.match(cached.get(reactBundle), /mountHistorySummary/);
   assert.match(cached.get(scope + "src/app.js"), /from "\.\/react-ui\.js"/);
+  const reactStyles = scope + "src/react-ui.css";
+  assert.match(cached.get(scope + "index.html"), /href="\.\/src\/react-ui\.css"/);
+  assert.match(cached.get(reactStyles), /\.tw\\:grid\s*\{/);
+  assert.doesNotMatch(cached.get(reactStyles), /::file-selector-button/);
   assert.ok(cached.has(scope + "icons/cookies-nutella.png"));
   assert.equal(currentCache.size, 1);
   assert.match([...currentCache][0].slice(prefix.length), /^[0-9a-f]{16}$/);
@@ -72,6 +76,7 @@ test("PWA: build, precache completo e fallback offline sob o caminho do Pages", 
     respondWith: resolve,
   }));
   assert.equal(await offline(reactBundle, "cors"), cached.get(reactBundle));
+  assert.equal(await offline(reactStyles, "cors"), cached.get(reactStyles));
   assert.equal(await offline(scope + "unknown", "navigate"), cached.get(scope + "index.html"));
 
   const manifest = JSON.parse(cached.get(scope + "manifest.webmanifest"));
