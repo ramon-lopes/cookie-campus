@@ -1,18 +1,76 @@
-import {test} from 'node:test';
-import assert from 'node:assert/strict';
-import {readFile,access} from 'node:fs/promises';
-import vm from 'node:vm';
-test('PWA: recursos locais, instalação e resposta offline do Service Worker',async()=>{
- const code=await readFile('sw.js','utf8'),events={},cached=new Map();
- const cache={addAll:async assets=>{for(const path of assets){await access(path==='./'?'index.html':path);cached.set(path,{body:path});}},match:async req=>cached.get(typeof req==='string'?req:new URL(req.url).pathname.replace('/repo/','./'))};
- const removed=[];
- const context={self:{registration:{scope:'https://test.example/repo/'},addEventListener:(type,fn)=>events[type]=fn,clients:{claim:async()=>{}}},caches:{open:async()=>cache,keys:async()=>['cookie-campus-v2','cookie-campus:https://test.example/repo/:v2','cookie-campus:https://test.example/other/:v2'],delete:async key=>removed.push(key)},URL,Response,fetch:async()=>{throw Error('offline');}};
- vm.runInNewContext(code,context);
- let work;events.install({waitUntil:p=>work=p});await work;
- for(const asset of ['./index.html','./styles.css','./manifest.webmanifest','./src/app.js','./src/domain.js','./src/db.js','./src/operations-ui.js','./src/history-ui.js','./src/access.js'])assert.ok(cached.has(asset),asset);
- for(const flavor of ['black','nutella','red','tradicional'])assert.ok(cached.has(`./icons/cookies-${flavor}.png`),flavor);
- events.activate({waitUntil:p=>work=p});await work;assert.deepEqual(removed,['cookie-campus:https://test.example/repo/:v2']);
- events.fetch({request:{method:'GET',url:'https://test.example/repo/src/app.js',mode:'cors'},respondWith:p=>work=p});assert.equal((await work).body,'./src/app.js');
- events.fetch({request:{method:'GET',url:'https://test.example/repo/unknown',mode:'navigate'},respondWith:p=>work=p});assert.equal((await work).body,'./index.html');
- const manifest=JSON.parse(await readFile('manifest.webmanifest','utf8'));assert.equal(manifest.start_url,'./');assert.equal(manifest.display,'standalone');for(const icon of manifest.icons)await access(icon.src);
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
+import vm from "node:vm";
+import { buildApp } from "../scripts/build.mjs";
+
+test("PWA: build, precache completo e fallback offline sob o caminho do Pages", async (t) => {
+  const output = await mkdtemp(join(tmpdir(), "cookie-campus-pwa-"));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  await buildApp(output);
+
+  const scope = "https://test.example/cookie-campus/";
+  const prefix = "cookie-campus:" + scope + ":";
+  const currentCache = new Set();
+  const cached = new Map();
+  const events = {};
+  const removed = [];
+  const cache = {
+    async addAll(requests) {
+      for (const request of requests) {
+        assert.equal(request.cache, "reload");
+        assert.ok(request.url.startsWith(scope));
+        const path = request.url.slice(scope.length) || "index.html";
+        cached.set(request.url, await readFile(join(output, path), "utf8"));
+      }
+    },
+    async match(request) {
+      return cached.get(new URL(request.url ?? request, scope).href);
+    },
+  };
+  const context = {
+    self: {
+      registration: { scope },
+      addEventListener: (type, callback) => { events[type] = callback; },
+      clients: { claim: async () => {} },
+    },
+    caches: {
+      open: async (key) => { currentCache.add(key); return cache; },
+      keys: async () => ["cookie-campus-v2", prefix + "v7", "cookie-campus:https://test.example/other/:v2", ...currentCache],
+      delete: async (key) => removed.push(key),
+    },
+    URL, Request, Response,
+    fetch: async () => { throw new Error("offline"); },
+  };
+  vm.runInNewContext(await readFile(join(output, "sw.js"), "utf8"), context);
+  const extend = (type) => new Promise((resolve) => events[type]({ waitUntil: resolve }));
+  await extend("install");
+
+  const files = await readdir(output, { recursive: true, withFileTypes: true });
+  const expected = files.filter((entry) => entry.isFile() && entry.name !== "sw.js")
+    .map((entry) => relative(output, join(entry.parentPath, entry.name)).split(sep).join("/"))
+    .map((path) => new URL(path, scope).href);
+  assert.deepEqual([...cached.keys()].sort(), [scope, ...expected].sort());
+  const reactBundle = scope + "src/stock-cards.js";
+  assert.match(cached.get(reactBundle), /mountStockCards/);
+  assert.match(cached.get(scope + "src/app.js"), /from "\.\/stock-cards\.js"/);
+  assert.ok(cached.has(scope + "icons/cookies-nutella.png"));
+  assert.equal(currentCache.size, 1);
+  assert.match([...currentCache][0].slice(prefix.length), /^[0-9a-f]{16}$/);
+
+  await extend("activate");
+  assert.deepEqual(removed, [prefix + "v7"]);
+  const offline = (url, mode) => new Promise((resolve) => events.fetch({
+    request: { method: "GET", url, mode },
+    respondWith: resolve,
+  }));
+  assert.equal(await offline(reactBundle, "cors"), cached.get(reactBundle));
+  assert.equal(await offline(scope + "unknown", "navigate"), cached.get(scope + "index.html"));
+
+  const manifest = JSON.parse(cached.get(scope + "manifest.webmanifest"));
+  assert.equal(manifest.start_url, "./");
+  assert.equal(manifest.display, "standalone");
+  for (const icon of manifest.icons) await access(join(output, icon.src));
 });
