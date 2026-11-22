@@ -10,28 +10,29 @@ const stockIconsByName = new Map([
   ["nutella", "nutella"], ["oreo", "black"], ["oreo com nutella", "black"],
   ["red ninho", "red"], ["red nutella", "red"],
 ]);
+const quantity = new Intl.NumberFormat("pt-BR");
 
 function StockCard({ flavor, balances, formattedPrice }) {
   const { available, reserved, sold } = balances;
   const icon = stockIconsById.get(flavor.id) ?? stockIconsByName.get(flavor.name.trim().toLowerCase());
-  const status = available ? "disponíveis" : reserved ? "Sem unidades livres" : "Esgotado";
+  const status = available ? "Disponíveis" : reserved ? "Sem unidades livres" : "Esgotado";
   return (
-    <article className="card stock-card">
-      <div className="stock-top">
-        {icon && <img className="stock-icon" src={`./icons/cookies-${icon}.png`} width="24" height="24" alt="" />}
+    <article className="stock-card tw:grid tw:min-w-0 tw:grid-rows-[auto_1fr_auto] tw:gap-[0.75rem] tw:rounded-[1rem] tw:bg-white tw:p-[0.75rem]">
+      <div className="stock-top tw:flex tw:items-start tw:gap-[0.5rem]">
+        {icon && <img className="stock-icon tw:shrink-0" src={`./icons/cookies-${icon}.png`} width="24" height="24" alt="" />}
         <div>
           <h3>{flavor.name}{flavor.active ? "" : " (inativo)"}</h3>
           <div className="price">{formattedPrice}</div>
         </div>
       </div>
-      <div className={available ? "stock-available" : "stock-available stock-zero"}>
-        <strong>{available}</strong><span>{status}</span>
+      <div className="stock-available tw:flex tw:flex-wrap tw:items-baseline" data-balance={available ? "available" : reserved ? "held" : "empty"}>
+        <strong>{quantity.format(available)}</strong><span>{status}</span>
       </div>
       <dl className="stock-info">
-        <div className={!available && reserved ? "reserved-highlight" : undefined}>
-          <dt>Reservados</dt><dd>{reserved}</dd>
+        <div className={reserved ? "reserved-highlight" : undefined}>
+          <dt>Reservados</dt><dd>{quantity.format(reserved)}</dd>
         </div>
-        <div><dt>Vendidos</dt><dd>{sold}</dd></div>
+        <div><dt>Vendidos</dt><dd>{quantity.format(sold)}</dd></div>
       </dl>
     </article>
   );

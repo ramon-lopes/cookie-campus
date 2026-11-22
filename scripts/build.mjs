@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import { build } from "vite";
 import { checkRepositoryData } from "./check-data.mjs";
 
@@ -13,9 +14,11 @@ const staticFiles = [
 ];
 const worker = "sw.js";
 const reactSources = ["src/react-ui.jsx", "src/stock-cards.jsx", "src/history-summary.jsx"];
+const stockUtilities = "src/stock-utilities.css";
 const bundle = "src/react-ui.js";
+const stylesheet = "src/react-ui.css";
 const previousBundle = "src/stock-cards.js";
-const allowed = new Set([...staticFiles, bundle, worker, previousBundle]);
+const allowed = new Set([...staticFiles, bundle, stylesheet, worker, previousBundle]);
 
 async function checkOutput(directory, prefix = "") {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -29,27 +32,32 @@ async function checkOutput(directory, prefix = "") {
 }
 
 export async function buildApp(output = "dist") {
-  await checkRepositoryData([...staticFiles, worker, ...reactSources]);
+  await checkRepositoryData([...staticFiles, worker, ...reactSources, stockUtilities]);
   await mkdir(output, { recursive: true });
   await checkOutput(output);
 
   const result = await build({
     configFile: false,
+    plugins: [tailwindcss()],
     publicDir: false,
     logLevel: "error",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     build: {
       write: false,
       target: "safari15.4",
+      cssTarget: "safari15.4",
       rolldownOptions: { input: reactSources[0], preserveEntrySignatures: "strict" },
     },
   });
-  const [chunk, ...extra] = (Array.isArray(result) ? result : [result]).flatMap(({ output }) => output);
-  if (extra.length || chunk?.type !== "chunk") {
-    throw new Error("Esperava um único módulo JavaScript para os componentes React.");
+  const outputFiles = (Array.isArray(result) ? result : [result]).flatMap(({ output }) => output);
+  const chunk = outputFiles.find((file) => file.type === "chunk" && file.isEntry);
+  const css = outputFiles.find((file) => file.type === "asset" && file.fileName.endsWith(".css"));
+  if (outputFiles.length !== 2 || !chunk || !css) {
+    throw new Error("Esperava um módulo JavaScript e uma folha de estilos para os componentes React.");
   }
   const files = new Map(await Promise.all(staticFiles.map(async (file) => [file, await readFile(file)])));
   files.set(bundle, chunk.code);
+  files.set(stylesheet, css.source);
 
   const assets = ["./", ...Array.from(files.keys(), (file) => `./${file}`)];
   const workerSource = await readFile(worker, "utf8");

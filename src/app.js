@@ -379,13 +379,13 @@ function render() {
     const cards = state.flavors.map((flavor) => ({ flavor, balances: stock(state, d.id, flavor.id) }))
       .filter(({ flavor, balances }) => flavor.active || balances.available || balances.reserved || balances.sold);
     appView.innerHTML = `${title}${dayWarning(d)}
-      <section class="hero" aria-label="Registrar venda"><div><span>Vendas de ${dayDate}</span><strong>${money(n.gross)}</strong></div>
-        <button id="quick">＋ Venda rápida</button></section>
-      <div class="metrics today-metrics">
-        <div class="metric"><small>Cookies vendidos</small><strong>${n.units}</strong></div>
-        <div class="metric"><small>Caixa líquido</small><strong>${money(n.cashNet)}</strong></div>
-        <div class="metric"><small>A receber do dia</small><strong>${money(n.pending)}</strong></div>
-      </div>`;
+      <section class="hero" aria-labelledby="today-sales"><div><span id="today-sales">Vendas do dia</span><strong>${money(n.gross)}</strong></div>
+        <button class="primary" id="quick"><span aria-hidden="true">＋</span> Venda rápida</button></section>
+      <dl class="metrics">
+        <div class="metric"><dt>Cookies vendidos</dt><dd>${n.units.toLocaleString("pt-BR")}</dd></div>
+        <div class="metric cash-tile"><dt>Caixa líquido</dt><dd>${money(n.cashNet)}</dd></div>
+        <div class="metric"><dt>A receber do dia</dt><dd>${money(n.pending)}</dd></div>
+      </dl>`;
     renderStockCards(cards);
     $("#quick").onclick = () => sale();
   } else if (tab === "reservas") {
