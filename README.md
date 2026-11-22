@@ -1,6 +1,6 @@
 # Cookie Campus
 
-PWA mobile-first para vendas de cookies na faculdade. HTML, CSS e JavaScript com módulos ES, sem framework, backend ou dependências de produção. Dados persistidos em IndexedDB; arquivos da aplicação disponíveis offline via Service Worker.
+PWA mobile-first para vendas de cookies na faculdade. HTML, CSS e JavaScript com módulos ES, com React nos cards **Estoque por sabor**. Dados persistidos em IndexedDB. Arquivos da aplicação disponíveis offline via Service Worker.
 
 ## Executar
 
@@ -12,13 +12,13 @@ npm test
 npm start
 ```
 
-Abra http://localhost:4173. Não abra `index.html` diretamente pelo explorador: módulos e Service Worker precisam de um servidor HTTP/HTTPS. `npm start` não requer dependências; `npm ci` instala apenas a ferramenta de testes `fake-indexeddb`.
+Abra http://localhost:4173. `npm start` roda o build e serve a pasta `dist/`. Reinicie o servidor para ver mudanças nos arquivos. Os módulos JavaScript e o Service Worker precisam do servidor.
 
 ```sh
 npm run build
 ```
 
-Gera a aplicação estática em `dist/` por uma lista explícita de arquivos. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor de desenvolvimento serve a raiz do projeto somente em `127.0.0.1`; para hospedagem, publique apenas `dist/`. A variável `PORT` permite uma origem separada para testes, sem acessar o IndexedDB da porta padrão.
+Gera a aplicação estática em `dist/`. O Vite empacota o módulo React dos cards. Os demais arquivos publicáveis vêm de uma lista explícita. O build bloqueia arquivos inesperados em `dist/` e verifica possíveis backups nos arquivos do Git. Fora de um checkout Git, verifica a lista explícita de arquivos publicáveis. O servidor atende somente em `127.0.0.1`. A variável `PORT` permite uma origem separada para testes, com seu próprio IndexedDB.
 
 ## Publicar no GitHub Pages
 
@@ -77,6 +77,7 @@ Backups não são criptografados. Guarde-os com cuidado, pois podem conter nomes
 - `src/app.js`: interface, formulários, feedback, navegação e atualização entre abas.
 - `src/operations-ui.js`: seleção de quantidades, edição de reservas, confirmação de pagamentos/reembolsos e conferência de restauração.
 - `src/history-ui.js`: resumo, detalhes e formatação de vendas, caixa e estoque.
+- `src/stock-cards.jsx`: cards React, renderizados em um elemento estável de Hoje com os saldos do domínio.
 - `src/access.js`: bloqueio local, verificação da senha e recuperação via Web Crypto.
 - `styles.css`: layout responsivo, formulários e áreas seguras do iPhone.
 - `sw.js`: cache dos recursos locais, sem fontes, scripts ou serviços externos.
@@ -90,7 +91,7 @@ O banco continua na versão 1 e no mesmo object store. Os fechamentos novos pode
 
 ## Atualizações e offline
 
-Ao modificar arquivos da aplicação, altere a versão `CACHE` em `sw.js` e publique novamente somente quando autorizado. O cache inclui o novo módulo de interface e é separado por escopo/URL da instalação. A leitura offline usa apenas o cache dessa instalação. Caches antigos sem escopo são deixados intactos para não afetar outra instalação. Uma atualização aguarda o fechamento das abas antigas para evitar mistura de versões. Feche o aplicativo e reabra com internet para receber a nova versão. Os dados do IndexedDB são preservados.
+O build gera a lista de arquivos do cache e calcula a versão a partir do conteúdo publicado, incluindo o componente React. Cada instalação usa o cache do seu escopo. Uma atualização aguarda o fechamento das abas antigas antes de ativar. Feche o aplicativo e reabra com internet para receber a nova versão. Os registros operacionais continuam no IndexedDB.
 
 ## Verificações
 

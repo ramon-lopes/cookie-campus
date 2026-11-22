@@ -13,6 +13,7 @@ import {
   reservationPayment,
 } from "./domain.js";
 import { read, mutate } from "./db.js";
+import { mountStockCards } from "./stock-cards.js";
 const $ = (s) => document.querySelector(s),
   money = (n) =>
     (n / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
@@ -43,6 +44,9 @@ const dialog = $("#dialog"),
     "BroadcastChannel" in window
       ? new BroadcastChannel("cookies-campus")
       : null;
+const appView = $("#app-view");
+const todayStock = $("#today-stock");
+const renderStockCards = mountStockCards($("#stock-grid"), money);
 function toast(message) {
   $("#toast").textContent = message;
   $("#toast").classList.add("show");
@@ -315,30 +319,6 @@ function dayWarning(d) {
       As operações ficam nesse dia até você fechar e abrir outro.</p>`
     : "";
 }
-const stockIconsById = new Map([
-  ["f0", "nutella"], ["f1", "tradicional"], ["f2", "red"], ["f3", "red"],
-  ["f4", "black"], ["f5", "black"], ["6837b8cf-64a6-4e78-8cd1-649d3ba7fce5", "tradicional"],
-]);
-const stockIconsByName = new Map([
-  ["black bueno", "black"], ["laka com oreo", "tradicional"], ["ninho com nutella", "tradicional"],
-  ["nutella", "nutella"], ["oreo", "black"], ["oreo com nutella", "black"],
-  ["red ninho", "red"], ["red nutella", "red"],
-]);
-function stockIcon(flavor) {
-  const icon = stockIconsById.get(flavor.id) ?? stockIconsByName.get(flavor.name.trim().toLowerCase());
-  return icon ? `<img class="stock-icon" src="./icons/cookies-${icon}.png" width="24" height="24" alt="">` : "";
-}
-function stockCard(flavor, q) {
-  const status = q.available ? "disponíveis" : q.reserved ? "Sem unidades livres" : "Esgotado";
-  return `<article class="card stock-card">
-    <div class="stock-top">${stockIcon(flavor)}
-      <div><h3>${esc(flavor.name)}${flavor.active ? "" : " (inativo)"}</h3><div class="price">${money(flavor.price)}</div></div>
-    </div>
-    <div class="stock-available ${q.available ? "" : "stock-zero"}"><strong>${q.available}</strong><span>${status}</span></div>
-    <dl class="stock-info"><div class="${!q.available && q.reserved ? "reserved-highlight" : ""}">
-      <dt>Reservados</dt><dd>${q.reserved}</dd></div><div><dt>Vendidos</dt><dd>${q.sold}</dd></div></dl>
-  </article>`;
-}
 function reservationCard(r) {
   const paid = reservationPayment(state, r.id);
   const id = esc(r.id);
@@ -353,7 +333,7 @@ function reservationCard(r) {
 }
 const disclosures = new Map();
 function rememberDisclosures() {
-  for (const details of $("#app").querySelectorAll("[data-disclosure]"))
+  for (const details of appView.querySelectorAll("[data-disclosure]"))
     disclosures.set(details.dataset.disclosure, details.open);
 }
 function navigate(next) {
@@ -364,7 +344,8 @@ function navigate(next) {
 function render() {
   if (access.locked || !state) return;
   const d = opened(state);
-  const app = $("#app");
+  todayStock.hidden = tab !== "hoje" || !d;
+  if (todayStock.hidden) renderStockCards([]);
   rememberDisclosures();
   document.querySelectorAll("[data-tab]").forEach((b) => {
     const selected = b.dataset.tab === tab;
@@ -378,7 +359,7 @@ function render() {
       <span class="pill ${d ? "" : "closed-pill"}">${d ? "Dia aberto" : "Sem dia aberto"}</span></div>`;
     if (!d) {
       const { source } = nextOpening(state);
-      app.innerHTML = `${title}<section class="empty"><h2>Abrir dia de vendas</h2>
+      appView.innerHTML = `${title}<section class="empty"><h2>Abrir dia de vendas</h2>
         <p class="muted">${source
           ? `Há sobras confirmadas em ${displayDate(businessDate(source))} prontas para aproveitar.`
           : "Informe os cookies recebidos para começar."}</p>
@@ -387,35 +368,29 @@ function render() {
       return;
     }
     const n = financial(state, d.id);
-    const cards = state.flavors.map((flavor) => ({ flavor, q: stock(state, d.id, flavor.id) }))
-      .filter(({ flavor, q }) => flavor.active || q.available || q.reserved || q.sold)
-      .map(({ flavor, q }) => stockCard(flavor, q)).join("");
-    app.innerHTML = `${title}${dayWarning(d)}
+    const cards = state.flavors.map((flavor) => ({ flavor, balances: stock(state, d.id, flavor.id) }))
+      .filter(({ flavor, balances }) => flavor.active || balances.available || balances.reserved || balances.sold);
+    appView.innerHTML = `${title}${dayWarning(d)}
       <section class="hero" aria-label="Registrar venda"><div><span>Vendas de ${dayDate}</span><strong>${money(n.gross)}</strong></div>
         <button id="quick">＋ Venda rápida</button></section>
       <div class="metrics today-metrics">
         <div class="metric"><small>Cookies vendidos</small><strong>${n.units}</strong></div>
         <div class="metric"><small>Caixa líquido</small><strong>${money(n.cashNet)}</strong></div>
         <div class="metric"><small>A receber do dia</small><strong>${money(n.pending)}</strong></div>
-      </div>
-      <div class="section-title"><h2>Estoque por sabor</h2><button id="move">Movimentar estoque</button></div>
-      <div class="grid stock-grid">${cards}</div>
-      <div class="actions"><button id="share">Divulgar no WhatsApp</button><button id="close">Conferir e fechar dia</button></div>`;
+      </div>`;
+    renderStockCards(cards);
     $("#quick").onclick = () => sale();
-    $("#move").onclick = move;
-    $("#share").onclick = share;
-    $("#close").onclick = closeDay;
   } else if (tab === "reservas") {
     const rs = state.reservations.filter((r) => r.status === "pending");
-    app.innerHTML = `<div class="heading"><h1>Reservas</h1><span class="pill">${rs.length} pendentes</span></div>
+    appView.innerHTML = `<div class="heading"><h1>Reservas</h1><span class="pill">${rs.length} pendentes</span></div>
       <button class="primary wide" id="reserve">＋ Nova reserva</button><div class="stack reservations-list">${rs.length
         ? rs.map(reservationCard).join("")
         : '<p class="empty">Nenhuma reserva pendente.</p>'}</div>`;
     $("#reserve").onclick = () => sale(true);
   } else if (tab === "historico") {
-    app.innerHTML = renderHistory(state, { money, esc, stamp, clock });
+    appView.innerHTML = renderHistory(state, { money, esc, stamp, clock });
     $("#backup").onclick = () => download(state);
-    for (const details of app.querySelectorAll("[data-disclosure]")) {
+    for (const details of appView.querySelectorAll("[data-disclosure]")) {
       if (disclosures.has(details.dataset.disclosure))
         details.open = disclosures.get(details.dataset.disclosure);
     }
@@ -438,7 +413,9 @@ const access = createAccess({
   onLock: () => {
     state = undefined;
     disclosures.clear();
-    $("#app").replaceChildren();
+    appView.replaceChildren();
+    todayStock.hidden = true;
+    renderStockCards([]);
     $("#dialog-body").replaceChildren();
     $("#toast").classList.remove("show");
     $("#toast").textContent = "";
@@ -457,6 +434,9 @@ $(".brand").onclick = (e) => {
   navigate("hoje");
 };
 $("#settings").onclick = () => ui.settings();
+$("#move").onclick = move;
+$("#share").onclick = share;
+$("#close").onclick = closeDay;
 $("#app").addEventListener("click", (e) => {
   const button = e.target.closest("button");
   if (!button || access.locked) return;
@@ -519,6 +499,6 @@ try {
     navigator.serviceWorker.register("./sw.js")
       .catch(() => toast("Modo offline indisponível. Use HTTPS ou localhost."));
 } catch (e) {
-  $(access.locked ? "#access-screen" : "#app").textContent =
+  $(access.locked ? "#access-screen" : "#app-view").textContent =
     "Não foi possível abrir o banco de dados: " + e.message;
 }

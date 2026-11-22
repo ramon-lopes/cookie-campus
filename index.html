@@ -22,7 +22,14 @@
         <button class="icon-button" id="settings" aria-label="Configurações e backup">⚙︎</button>
       </header>
       <div class="connection" id="connection"></div>
-      <main id="app" tabindex="-1"><p>Carregando seus cookies…</p></main>
+      <main id="app" tabindex="-1">
+        <div id="app-view"><p>Carregando seus cookies…</p></div>
+        <div id="today-stock" hidden>
+          <div class="section-title"><h2>Estoque por sabor</h2><button id="move">Movimentar estoque</button></div>
+          <div class="grid stock-grid" id="stock-grid"></div>
+          <div class="actions"><button id="share">Divulgar no WhatsApp</button><button id="close">Conferir e fechar dia</button></div>
+        </div>
+      </main>
     </div>
     <nav aria-label="Navegação principal">
       <button data-tab="hoje" aria-label="Hoje">◷<span>Hoje</span></button>

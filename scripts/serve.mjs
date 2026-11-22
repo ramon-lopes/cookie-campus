@@ -1,7 +1,7 @@
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-const root = process.cwd(),
+const root = path.resolve("dist"),
   types = {
     ".html": "text/html",
     ".js": "text/javascript",
